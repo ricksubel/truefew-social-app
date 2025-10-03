@@ -2512,6 +2512,7 @@ function submitEditProfile() {
     currentUser.state = state;
     currentUser.country = country;
     currentUser.interests = [...selectedInterests];
+    if (!currentUser.id && currentUser.uid) currentUser.id = currentUser.uid;
     
     // Update avatar if new image was selected
     if (imageFile) {
@@ -2531,6 +2532,28 @@ function submitEditProfile() {
             // Save to storage
             saveDataToStorage();
             
+            // Sync to Firestore if authenticated
+            if (currentUser.uid && typeof db !== 'undefined') {
+                (async () => {
+                    try {
+                        await db.collection('users').doc(currentUser.uid).update({
+                            fullName: currentUser.fullName,
+                            username: currentUser.username,
+                            email: currentUser.email,
+                            city: currentUser.city,
+                            state: currentUser.state,
+                            country: currentUser.country,
+                            interests: currentUser.interests,
+                            avatar: currentUser.avatar,
+                            updatedAt: new Date().toISOString()
+                        });
+                        console.log('✅ Firestore profile updated (image path)');
+                    } catch (err) {
+                        console.error('❌ Firestore update failed (image path):', err);
+                        showNotification('Profile saved locally. Cloud sync failed.', 'warning');
+                    }
+                })();
+            }
             console.log('🔧 About to call updateNavbarForSignedInUser...');
             // Update UI
             updateNavbarForSignedInUser();
@@ -2567,6 +2590,26 @@ function submitEditProfile() {
     
     // Save to storage
     saveDataToStorage();
+    if (currentUser.uid && typeof db !== 'undefined') {
+        (async () => {
+            try {
+                await db.collection('users').doc(currentUser.uid).update({
+                    fullName: currentUser.fullName,
+                    username: currentUser.username,
+                    email: currentUser.email,
+                    city: currentUser.city,
+                    state: currentUser.state,
+                    country: currentUser.country,
+                    interests: currentUser.interests,
+                    updatedAt: new Date().toISOString()
+                });
+                console.log('✅ Firestore profile updated (no image path)');
+            } catch (err) {
+                console.error('❌ Firestore update failed (no image path):', err);
+                showNotification('Profile saved locally. Cloud sync failed.', 'warning');
+            }
+        })();
+    }
     
     // Update UI
     updateNavbarForSignedInUser();
@@ -2625,6 +2668,11 @@ auth.onAuthStateChanged(async (user) => {
                 const userDoc = await db.collection('users').doc(user.uid).get();
                 if (userDoc.exists) {
                     currentUser = { uid: user.uid, ...userDoc.data() };
+                    // Normalize id + arrays for legacy local logic
+                    if (!currentUser.id) currentUser.id = currentUser.uid;
+                    currentUser.friends = Array.isArray(currentUser.friends) ? currentUser.friends : [];
+                    currentUser.friendRequests = Array.isArray(currentUser.friendRequests) ? currentUser.friendRequests : [];
+                    currentUser.messages = Array.isArray(currentUser.messages) ? currentUser.messages : [];
                     updateNavbarForSignedInUser();
                     
                     // Only redirect to dashboard if we're on landing page
