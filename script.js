@@ -1640,15 +1640,21 @@ function previewProfileImage() {
 function attachPhotoToPost() {
     const file = document.getElementById('postPhoto').files[0];
     if (file) {
-        attachedMedia = {
-            type: 'image',
-            url: URL.createObjectURL(file),
-            title: file.name
+        // Convert image to base64 so it persists if saved to storage
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            attachedMedia = {
+                type: 'image',
+                url: e.target.result,
+                title: file.name
+            };
+            updateAttachmentButtons();
+            const modalEl = document.getElementById('photoModal');
+            const modalInstance = bootstrap.Modal.getInstance(modalEl);
+            if (modalInstance) modalInstance.hide();
+            showToast('Photo attached!', 'success');
         };
-        
-        updateAttachmentButtons();
-        bootstrap.Modal.getInstance(document.getElementById('photoModal')).hide();
-        showToast('Photo attached!', 'success');
+        reader.readAsDataURL(file);
     }
 }
 
@@ -2578,6 +2584,26 @@ function submitEditProfile() {
     } else if (currentPage === 'profile') {
         showProfile('current');
     }
+}
+
+// ---------------------------------------------------------------------------
+// Backward Compatibility Wrapper
+// Some older cached script versions or inline debug helpers may still invoke
+// updateNavbar(). Provide a safe wrapper that delegates to the new explicit
+// functions to eliminate ReferenceError crashes in FileReader callbacks.
+// ---------------------------------------------------------------------------
+if (typeof window.updateNavbar === 'undefined') {
+    window.updateNavbar = function() {
+        try {
+            if (currentUser && typeof updateNavbarForSignedInUser === 'function') {
+                updateNavbarForSignedInUser();
+            } else if (!currentUser && typeof updateNavbarForSignedOutUser === 'function') {
+                updateNavbarForSignedOutUser();
+            }
+        } catch (err) {
+            console.error('updateNavbar compatibility wrapper error:', err);
+        }
+    };
 }
 
 /* ===========================
