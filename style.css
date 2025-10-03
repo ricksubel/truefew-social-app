@@ -42,6 +42,15 @@ body {
 }
 
 /**
+ * Landing page body styles
+ * Prevents scrolling when on the hero/landing page
+ */
+body.landing-page {
+    overflow: hidden;
+    height: 100vh;
+}
+
+/**
  * Utility class for interactive elements
  * Provides consistent cursor behavior
  */
@@ -320,8 +329,14 @@ body {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    min-height: 100vh;
+    height: 100vh;
     position: relative;
+    overflow: hidden;
+}
+
+/* Landing page layout - ensures no scroll */
+#landingPage {
+    height: 100vh;
     overflow: hidden;
 }
 

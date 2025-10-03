@@ -355,6 +355,7 @@ function setupEventListeners() {
 /**
  * Show the landing page
  * Hides all other pages and displays the main hero section
+ * Prevents body scrolling for immersive hero experience
  */
 function showLanding() {
     hideAllPages();
@@ -362,6 +363,8 @@ function showLanding() {
     if (landingPage) {
         landingPage.style.display = 'block';
         currentPage = 'landing';
+        // Prevent scrolling on landing page
+        document.body.classList.add('landing-page');
     } else {
         console.error('Landing page element not found');
     }
@@ -434,12 +437,15 @@ function showDemo() {
 /**
  * Hide all page sections
  * Utility function used by navigation to ensure only one page is visible
+ * Removes landing-page class to restore normal scrolling
  */
 function hideAllPages() {
     try {
         document.querySelectorAll('.page-section').forEach(page => {
             page.style.display = 'none';
         });
+        // Remove landing-page class to restore scrolling
+        document.body.classList.remove('landing-page');
     } catch (error) {
         console.error('Error hiding pages:', error);
     }
