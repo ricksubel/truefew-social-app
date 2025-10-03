@@ -544,6 +544,28 @@ function toggleInterest(interest) {
     }
 }
 
+// ===========================
+// Email Verification Utilities
+// ===========================
+async function resendVerificationEmail() {
+    try {
+        const user = auth.currentUser;
+        if (!user) {
+            showNotification('You must be signed in to resend verification.', 'warning');
+            return;
+        }
+        if (user.emailVerified) {
+            showNotification('Email already verified.', 'info');
+            return;
+        }
+        await user.sendEmailVerification();
+        showNotification('Verification email sent. Check your inbox/spam.', 'success');
+    } catch (err) {
+        console.error('Resend verification error:', err);
+        showNotification(err.message || 'Failed to resend verification email.', 'danger');
+    }
+}
+
 // Authentication Functions
 /**
  * Enhanced Sign Up with Firebase Authentication and Email Verification
@@ -587,10 +609,26 @@ async function submitSignUp() {
         // Create Firebase user
         const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         const user = userCredential.user;
-        
-        // Send email verification
-        await user.sendEmailVerification();
-        
+
+        // Prepare avatar (convert to base64 so it persists across contexts)
+        let avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&size=150&background=667eea&color=fff`;
+        if (imageFile) {
+            avatarUrl = await new Promise((resolve, reject) => {
+                const r = new FileReader();
+                r.onload = e => resolve(e.target.result);
+                r.onerror = err => reject(err);
+                r.readAsDataURL(imageFile);
+            });
+        }
+
+        // Send email verification (with action code settings for better UX if desired)
+        try {
+            await user.sendEmailVerification();
+        } catch (verifyErr) {
+            console.error('Email verification send failed:', verifyErr);
+            showNotification('Could not send verification email. You can request a new one from sign-in screen.', 'warning');
+        }
+
         // Create user profile in Firestore
         await db.collection('users').doc(user.uid).set({
             fullName,
@@ -600,10 +638,11 @@ async function submitSignUp() {
             state,
             country,
             interests: selectedInterests,
-            avatar: imageFile ? URL.createObjectURL(imageFile) : `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&size=150&background=667eea&color=fff`,
+            avatar: avatarUrl,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             friends: [],
-            friendRequests: []
+            friendRequests: [],
+            messages: []
         });
         
         // Sign out immediately to prevent auto-login before verification
@@ -646,7 +685,12 @@ async function submitSignIn() {
         
         // Check if email is verified
         if (!user.emailVerified) {
-            showNotification('Please verify your email before signing in. Check your inbox.', 'warning');
+            showNotification('Email not verified. We just re-sent the link (if allowed). Check your inbox/spam.', 'warning');
+            try {
+                await user.sendEmailVerification();
+            } catch (err) {
+                console.warn('Resend verification failed or throttled:', err?.message);
+            }
             await auth.signOut();
             return;
         }
