@@ -926,24 +926,29 @@ function updateNavbarForSignedInUser() {
         const navUserAvatar = document.getElementById('navUserAvatar');
         const navUsername = document.getElementById('navUsername');
         
-        if (navUserAvatar && currentUser && currentUser.avatar) {
-            console.log('🖼️ Setting navbar avatar to:', currentUser.avatar);
+        if (navUserAvatar && currentUser) {
+            console.log('🖼️ Setting navbar avatar. Current user avatar:', currentUser.avatar);
             
-            // Check for problematic localhost URLs
-            if (currentUser.avatar.includes('localhost:8001') || currentUser.avatar.includes('blob:')) {
-                console.warn('⚠️ Detected localhost/blob avatar URL, using placeholder');
-                navUserAvatar.src = 'https://via.placeholder.com/35x35/007bff/ffffff?text=U';
+            // Default avatar URL
+            const defaultAvatar = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser.fullName || 'User') + '&background=007bff&color=ffffff&size=40';
+            
+            // Check for problematic URLs or missing avatar
+            if (!currentUser.avatar || 
+                currentUser.avatar.includes('localhost') || 
+                currentUser.avatar.includes('blob:') || 
+                currentUser.avatar === '' || 
+                currentUser.avatar === 'null') {
+                console.warn('⚠️ Using default avatar for navbar');
+                navUserAvatar.src = defaultAvatar;
             } else {
                 navUserAvatar.src = currentUser.avatar;
+                // Fallback if image fails to load
+                navUserAvatar.onerror = function() {
+                    console.warn('⚠️ Avatar failed to load, using default');
+                    this.src = defaultAvatar;
+                    this.onerror = null; // Prevent infinite loop
+                };
             }
-            
-            // Verify it was set correctly
-            setTimeout(() => {
-                if (navUserAvatar.src !== currentUser.avatar && !currentUser.avatar.includes('localhost') && !currentUser.avatar.includes('blob:')) {
-                    console.warn('⚠️ Avatar not set correctly, retrying...');
-                    navUserAvatar.src = currentUser.avatar;
-                }
-            }, 100);
         }
         
         if (navUsername && currentUser && currentUser.username) {
@@ -996,11 +1001,31 @@ function updateNavbarForSignedOutUser() {
 function updateDashboardContent() {
     if (!currentUser) return;
     
+    // Default avatar URL with user's name
+    const defaultAvatar = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser.fullName || 'User') + '&background=007bff&color=ffffff&size=80';
+    
     // Update composer avatar
-    document.getElementById('composerAvatar').src = currentUser.avatar;
+    const composerAvatar = document.getElementById('composerAvatar');
+    if (composerAvatar) {
+        if (!currentUser.avatar || currentUser.avatar.includes('localhost') || currentUser.avatar.includes('blob:')) {
+            composerAvatar.src = defaultAvatar;
+        } else {
+            composerAvatar.src = currentUser.avatar;
+            composerAvatar.onerror = function() { this.src = defaultAvatar; this.onerror = null; };
+        }
+    }
     
     // Update sidebar profile
-    document.getElementById('sidebarAvatar').src = currentUser.avatar;
+    const sidebarAvatar = document.getElementById('sidebarAvatar');
+    if (sidebarAvatar) {
+        if (!currentUser.avatar || currentUser.avatar.includes('localhost') || currentUser.avatar.includes('blob:')) {
+            sidebarAvatar.src = defaultAvatar;
+        } else {
+            sidebarAvatar.src = currentUser.avatar;
+            sidebarAvatar.onerror = function() { this.src = defaultAvatar; this.onerror = null; };
+        }
+    }
+    
     document.getElementById('sidebarUsername').textContent = `@${currentUser.username}`;
     document.getElementById('sidebarFullName').textContent = currentUser.fullName;
     

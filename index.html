@@ -634,19 +634,31 @@
             }, 1000); // Wait 1 second for everything to load
         });
         
-        // Debug avatar issues
+        // Debug avatar issues - more aggressive fix
         function fixAvatarUrls() {
-            const avatars = document.querySelectorAll('#navUserAvatar, #composerAvatar, #sidebarAvatar');
-            avatars.forEach(avatar => {
-                if (avatar.src && avatar.src.includes('localhost:8001')) {
-                    console.warn('🐛 Found localhost avatar, clearing:', avatar.src);
-                    avatar.src = 'https://via.placeholder.com/40x40/007bff/ffffff?text=U';
-                    avatar.alt = 'User Avatar';
+            const avatarSelectors = [
+                '#navUserAvatar',
+                '#composerAvatar', 
+                '#sidebarAvatar',
+                '#profileAvatar'
+            ];
+            
+            avatarSelectors.forEach(selector => {
+                const avatar = document.querySelector(selector);
+                if (avatar) {
+                    if (!avatar.src || avatar.src.includes('localhost') || avatar.src.includes('blob:') || avatar.src === '' || avatar.src.includes('null')) {
+                        console.log('� Fixing avatar:', selector);
+                        avatar.src = 'https://ui-avatars.com/api/?name=User&background=007bff&color=ffffff&size=128';
+                        avatar.onerror = function() {
+                            this.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiMwMDdiZmYiLz4KPHRleHQgeD0iMjAiIHk9IjI2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IndoaXRlIj5VPC90ZXh0Pgo8L3N2Zz4K';
+                        };
+                    }
                 }
             });
         }
         
-        // Run avatar fix every 2 seconds
+        // Run immediately and then every 2 seconds
+        fixAvatarUrls();
         setInterval(fixAvatarUrls, 2000);
     </script>
 </body>
