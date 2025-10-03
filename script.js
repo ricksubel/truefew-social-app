@@ -860,6 +860,7 @@ function declineFriendRequest(requesterId) {
 
 // Global variable to track profile button mode
 let isSignedInMode = false;
+let lastNavbarUpdate = 0;
 
 /**
  * Universal profile button handler
@@ -874,7 +875,17 @@ function handleProfileButtonClick() {
 }
 // UI Update Functions
 function updateNavbarForSignedInUser() {
+    // Throttle rapid calls to prevent conflicts
+    const now = Date.now();
+    if (now - lastNavbarUpdate < 100) {
+        console.log('Throttling navbar update, too recent');
+        return;
+    }
+    lastNavbarUpdate = now;
+    
     try {
+        console.log('Updating navbar for signed-in user:', currentUser?.fullName);
+        
         // Set mode flag
         isSignedInMode = true;
         
@@ -896,13 +907,28 @@ function updateNavbarForSignedInUser() {
             userNavArea.setAttribute('style', 'display: flex !important;');
         }
         
-        // Update user avatar and username
+        // Update user avatar and username with retry mechanism
         const navUserAvatar = document.getElementById('navUserAvatar');
         const navUsername = document.getElementById('navUsername');
         
         if (navUserAvatar && currentUser && currentUser.avatar) {
+            // Set avatar with error handling and retry
+            navUserAvatar.onerror = function() {
+                console.warn('Avatar failed to load, retrying...');
+                setTimeout(() => {
+                    navUserAvatar.src = currentUser.avatar;
+                }, 100);
+            };
             navUserAvatar.src = currentUser.avatar;
             console.log('Set avatar to:', currentUser.avatar);
+            
+            // Force image load with a small delay to ensure it sticks
+            setTimeout(() => {
+                if (navUserAvatar.src !== currentUser.avatar) {
+                    console.log('Re-setting avatar after delay');
+                    navUserAvatar.src = currentUser.avatar;
+                }
+            }, 200);
         }
         
         if (navUsername && currentUser && currentUser.username) {
