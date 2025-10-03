@@ -343,6 +343,18 @@ function setupEventListeners() {
             }
         });
         
+        // Glassmorphism navbar scroll effect
+        window.addEventListener('scroll', function() {
+            const navbar = document.querySelector('.glassmorphism-navbar');
+            if (navbar) {
+                if (window.scrollY > 50) {
+                    navbar.classList.add('scrolled');
+                } else {
+                    navbar.classList.remove('scrolled');
+                }
+            }
+        });
+        
         console.log('Event listeners setup complete');
         
     } catch (error) {
