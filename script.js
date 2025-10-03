@@ -179,13 +179,8 @@ function initializeApp() {
             console.log(`Auto-login successful for user: ${currentUser.username}`);
             updateNavbarForSignedInUser();
             showDashboard();
-        } else {
-            // Initialize profile button for signed-out state
-            const openProfileBtn = document.getElementById('openProfileBtn');
-            if (openProfileBtn) {
-                openProfileBtn.addEventListener('click', showSignUpModal);
-            }
         }
+        // Note: Profile button listener is set up in setupEventListeners() with universal handler
         
     } catch (error) {
         console.error('Error during app initialization:', error);
@@ -318,7 +313,8 @@ function setupEventListeners() {
         
         // Check if elements exist before adding listeners (prevents errors)
         if (openSearchBtn) openSearchBtn.addEventListener('click', showSearchModal);
-        // Note: openProfileBtn listener is managed dynamically in navbar update functions
+        // Use universal profile button handler that routes based on sign-in state
+        if (openProfileBtn) openProfileBtn.addEventListener('click', handleProfileButtonClick);
         if (openSignInBtn) openSignInBtn.addEventListener('click', showSignInModal);
         if (signOutBtn) signOutBtn.addEventListener('click', signOut);
         if (heroCTA) heroCTA.addEventListener('click', showSignUpModal);
@@ -683,6 +679,12 @@ async function signOut() {
         // Clear local user data
         currentUser = null;
         
+        // Clear user-specific navbar data
+        const navUserAvatar = document.getElementById('navUserAvatar');
+        const navUsername = document.getElementById('navUsername');
+        if (navUserAvatar) navUserAvatar.src = '';
+        if (navUsername) navUsername.textContent = '';
+        
         // Update UI
         updateNavbarForSignedOutUser();
         showLanding();
@@ -856,45 +858,88 @@ function declineFriendRequest(requesterId) {
     showNotification('Friend request declined.', 'info');
 }
 
+// Global variable to track profile button mode
+let isSignedInMode = false;
+
+/**
+ * Universal profile button handler
+ * Routes to correct function based on user sign-in state
+ */
+function handleProfileButtonClick() {
+    if (isSignedInMode) {
+        editProfile();
+    } else {
+        showSignUpModal();
+    }
+}
 // UI Update Functions
 function updateNavbarForSignedInUser() {
-    const openProfileBtn = document.getElementById('openProfileBtn');
-    
-    document.getElementById('openSignInBtn').style.display = 'none';
-    
-    // Clone the button to remove all event listeners
-    const newBtn = openProfileBtn.cloneNode(true);
-    openProfileBtn.parentNode.replaceChild(newBtn, openProfileBtn);
-    
-    // Update content and add correct event listener
-    newBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Profile';
-    newBtn.addEventListener('click', editProfile);
-    
-    // Override the !important declaration by setting the style attribute directly
-    document.getElementById('userNavArea').setAttribute('style', 'display: flex !important;');
-    document.getElementById('navUserAvatar').src = currentUser.avatar;
-    document.getElementById('navUsername').textContent = `@${currentUser.username}`;
+    try {
+        // Set mode flag
+        isSignedInMode = true;
+        
+        // Update button appearance
+        const openProfileBtn = document.getElementById('openProfileBtn');
+        if (openProfileBtn) {
+            openProfileBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Profile';
+        }
+        
+        // Hide sign-in button
+        const signInBtn = document.getElementById('openSignInBtn');
+        if (signInBtn) {
+            signInBtn.style.display = 'none';
+        }
+        
+        // Show user area
+        const userNavArea = document.getElementById('userNavArea');
+        if (userNavArea) {
+            userNavArea.setAttribute('style', 'display: flex !important;');
+        }
+        
+        // Update user avatar and username
+        const navUserAvatar = document.getElementById('navUserAvatar');
+        const navUsername = document.getElementById('navUsername');
+        
+        if (navUserAvatar && currentUser && currentUser.avatar) {
+            navUserAvatar.src = currentUser.avatar;
+            console.log('Set avatar to:', currentUser.avatar);
+        }
+        
+        if (navUsername && currentUser && currentUser.username) {
+            navUsername.textContent = `@${currentUser.username}`;
+        }
+        
+    } catch (error) {
+        console.error('Error updating navbar for signed-in user:', error);
+    }
 }
 
 function updateNavbarForSignedOutUser() {
-    const openProfileBtn = document.getElementById('openProfileBtn');
-    
-    document.getElementById('openSignInBtn').style.display = 'inline-block';
-    
-    // Clone the button to remove all event listeners
-    const newBtn = openProfileBtn.cloneNode(true);
-    openProfileBtn.parentNode.replaceChild(newBtn, openProfileBtn);
-    
-    // Update content and add correct event listener
-    newBtn.innerHTML = '<i class="bi bi-person-plus"></i> Create Profile';
-    newBtn.addEventListener('click', showSignUpModal);
-    
-    // Override the !important declaration by setting the style attribute directly
-    document.getElementById('userNavArea').setAttribute('style', 'display: none !important;');
-    
-    // Clear user-specific data from the navbar
-    document.getElementById('navUserAvatar').src = '';
-    document.getElementById('navUsername').textContent = '';
+    try {
+        // Set mode flag
+        isSignedInMode = false;
+        
+        // Update button appearance
+        const openProfileBtn = document.getElementById('openProfileBtn');
+        if (openProfileBtn) {
+            openProfileBtn.innerHTML = '<i class="bi bi-person-plus"></i> Create Profile';
+        }
+        
+        // Show sign-in button
+        const signInBtn = document.getElementById('openSignInBtn');
+        if (signInBtn) {
+            signInBtn.style.display = 'inline-block';
+        }
+        
+        // Hide user area
+        const userNavArea = document.getElementById('userNavArea');
+        if (userNavArea) {
+            userNavArea.setAttribute('style', 'display: none !important;');
+        }
+        
+    } catch (error) {
+        console.error('Error updating navbar for signed-out user:', error);
+    }
 }
 
 function updateDashboardContent() {
