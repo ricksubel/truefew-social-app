@@ -2509,9 +2509,33 @@ function submitEditProfile() {
     
     // Update avatar if new image was selected
     if (imageFile) {
-        currentUser.avatar = URL.createObjectURL(imageFile);
+        // Convert image to base64 for persistent storage
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            currentUser.avatar = e.target.result;
+            
+            // Update the user in the users array
+            const userIndex = users.findIndex(u => u.id === currentUser.id);
+            if (userIndex !== -1) {
+                users[userIndex] = { ...currentUser };
+            }
+            
+            // Save to localStorage and update UI
+            localStorage.setItem('users', JSON.stringify(users));
+            localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            updateNavbar();
+            populateUserList();
+            
+            // Close modal and show success
+            const editModal = bootstrap.Modal.getInstance(document.getElementById('editProfileModal'));
+            editModal.hide();
+            alert('Profile updated successfully!');
+        };
+        reader.readAsDataURL(imageFile);
+        return; // Exit here to let the FileReader handle the rest
     }
     
+    // Handle normal profile update without image
     // Update the user in the users array
     const userIndex = users.findIndex(u => u.id === currentUser.id);
     if (userIndex !== -1) {
