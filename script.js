@@ -852,9 +852,16 @@ function declineFriendRequest(requesterId) {
 
 // UI Update Functions
 function updateNavbarForSignedInUser() {
+    const openProfileBtn = document.getElementById('openProfileBtn');
+    
     document.getElementById('openSignInBtn').style.display = 'none';
-    document.getElementById('openProfileBtn').innerHTML = '<i class="bi bi-pencil"></i> Edit Profile';
-    document.getElementById('openProfileBtn').onclick = editProfile; // Change onclick to editProfile function
+    openProfileBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Profile';
+    
+    // Remove the old event listener to prevent conflicts
+    openProfileBtn.removeEventListener('click', showSignUpModal);
+    // Add the new event listener for edit profile
+    openProfileBtn.addEventListener('click', editProfile);
+    
     // Override the !important declaration by setting the style attribute directly
     document.getElementById('userNavArea').setAttribute('style', 'display: flex !important;');
     document.getElementById('navUserAvatar').src = currentUser.avatar;
@@ -862,9 +869,16 @@ function updateNavbarForSignedInUser() {
 }
 
 function updateNavbarForSignedOutUser() {
+    const openProfileBtn = document.getElementById('openProfileBtn');
+    
     document.getElementById('openSignInBtn').style.display = 'inline-block';
-    document.getElementById('openProfileBtn').innerHTML = '<i class="bi bi-person-plus"></i> Create Profile';
-    document.getElementById('openProfileBtn').onclick = showSignUpModal; // Reset onclick to showSignUpModal
+    openProfileBtn.innerHTML = '<i class="bi bi-person-plus"></i> Create Profile';
+    
+    // Remove the edit profile event listener
+    openProfileBtn.removeEventListener('click', editProfile);
+    // Add back the sign up modal event listener
+    openProfileBtn.addEventListener('click', showSignUpModal);
+    
     // Override the !important declaration by setting the style attribute directly
     document.getElementById('userNavArea').setAttribute('style', 'display: none !important;');
     
