@@ -319,7 +319,7 @@ body {
     background: url('Assets/background-image.jpeg');
     background-size: cover;
     background-position: center;
-    background-attachment: fixed;
+    background-repeat: no-repeat;
     min-height: 100vh;
     position: relative;
     overflow: hidden;
