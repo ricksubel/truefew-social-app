@@ -2512,6 +2512,7 @@ function submitEditProfile() {
         // Convert image to base64 for persistent storage
         const reader = new FileReader();
         reader.onload = function(e) {
+            console.log('🔧 FileReader onload - about to update avatar');
             currentUser.avatar = e.target.result;
             
             // Update the user in the users array
@@ -2520,25 +2521,32 @@ function submitEditProfile() {
                 users[userIndex] = { ...currentUser };
             }
             
+            console.log('🔧 About to call saveDataToStorage...');
             // Save to storage
             saveDataToStorage();
             
+            console.log('🔧 About to call updateNavbarForSignedInUser...');
             // Update UI
             updateNavbarForSignedInUser();
+            console.log('🔧 About to call updateDashboardContent...');
             updateDashboardContent();
             
+            console.log('🔧 About to close modal...');
             // Close modal
             bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
             
+            console.log('🔧 About to show toast...');
             // Show success message
             showToast('Profile updated successfully!', 'success');
             
+            console.log('🔧 About to refresh page...');
             // Refresh current page
             if (currentPage === 'dashboard') {
                 showDashboard();
             } else if (currentPage === 'profile') {
                 showProfile('current');
             }
+            console.log('🔧 FileReader callback complete!');
         };
         reader.readAsDataURL(imageFile);
         return; // Exit here to let the FileReader handle the rest
