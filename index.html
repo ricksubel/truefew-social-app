@@ -20,10 +20,19 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700;800&display=swap" rel="stylesheet">
     
     <!-- Custom Stylesheet -->
-    <link rel="stylesheet" href="style.css"/>
+    <link rel="stylesheet" href="style.css?v=1.1"/>
 </head>
 
 <body class="bg-light">
+    <!-- Debug: Check if glassmorphism is working -->
+    <style>
+        .glassmorphism-navbar {
+            background: rgba(255, 255, 255, 0.15) !important;
+            backdrop-filter: blur(20px) saturate(180%) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+            border: 1px solid rgba(255, 255, 255, 0.125) !important;
+        }
+    </style>
     <!-- Main Application Container -->
     <!-- ===========================
          NAVIGATION BAR
@@ -576,6 +585,36 @@
     <script src="firebase-config.js"></script>
     
     <!-- Main Application Script -->
-    <script src="script.js"></script>
+    <script src="script.js?v=1.1"></script>
+    
+    <!-- Debug Script -->
+    <script>
+        console.log('🐛 Debug: Page loaded');
+        
+        // Debug the profile button issue
+        document.addEventListener('DOMContentLoaded', function() {
+            const profileBtn = document.getElementById('openProfileBtn');
+            if (profileBtn) {
+                console.log('🐛 Profile button found:', profileBtn);
+                
+                // Remove all existing listeners and add a clean one
+                const newBtn = profileBtn.cloneNode(true);
+                profileBtn.parentNode.replaceChild(newBtn, profileBtn);
+                
+                newBtn.addEventListener('click', function() {
+                    console.log('🐛 Profile button clicked!');
+                    if (window.isSignedInMode) {
+                        console.log('🐛 Calling editProfile()');
+                        editProfile();
+                    } else {
+                        console.log('🐛 Calling showSignUpModal()');
+                        showSignUpModal();
+                    }
+                });
+                
+                console.log('🐛 Clean profile button listener added');
+            }
+        });
+    </script>
 </body>
 </html>

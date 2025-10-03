@@ -872,6 +872,7 @@ function declineFriendRequest(requesterId) {
 
 // Global variable to track profile button mode and navbar state
 let isSignedInMode = false;
+window.isSignedInMode = false; // Expose globally for debugging
 let navbarUpdateInProgress = false;
 
 /**
@@ -900,6 +901,7 @@ function updateNavbarForSignedInUser() {
         
         // Set mode flag FIRST
         isSignedInMode = true;
+        window.isSignedInMode = true; // Sync with global
         
         // Update button appearance
         const openProfileBtn = document.getElementById('openProfileBtn');
@@ -956,6 +958,7 @@ function updateNavbarForSignedOutUser() {
         
         // Set mode flag FIRST
         isSignedInMode = false;
+        window.isSignedInMode = false; // Sync with global
         
         // Update button appearance
         const openProfileBtn = document.getElementById('openProfileBtn');
