@@ -928,11 +928,18 @@ function updateNavbarForSignedInUser() {
         
         if (navUserAvatar && currentUser && currentUser.avatar) {
             console.log('🖼️ Setting navbar avatar to:', currentUser.avatar);
-            navUserAvatar.src = currentUser.avatar;
+            
+            // Check for problematic localhost URLs
+            if (currentUser.avatar.includes('localhost:8001') || currentUser.avatar.includes('blob:')) {
+                console.warn('⚠️ Detected localhost/blob avatar URL, using placeholder');
+                navUserAvatar.src = 'https://via.placeholder.com/35x35/007bff/ffffff?text=U';
+            } else {
+                navUserAvatar.src = currentUser.avatar;
+            }
             
             // Verify it was set correctly
             setTimeout(() => {
-                if (navUserAvatar.src !== currentUser.avatar) {
+                if (navUserAvatar.src !== currentUser.avatar && !currentUser.avatar.includes('localhost') && !currentUser.avatar.includes('blob:')) {
                     console.warn('⚠️ Avatar not set correctly, retrying...');
                     navUserAvatar.src = currentUser.avatar;
                 }

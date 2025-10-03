@@ -593,28 +593,61 @@
         
         // Debug the profile button issue
         document.addEventListener('DOMContentLoaded', function() {
-            const profileBtn = document.getElementById('openProfileBtn');
-            if (profileBtn) {
-                console.log('🐛 Profile button found:', profileBtn);
-                
-                // Remove all existing listeners and add a clean one
-                const newBtn = profileBtn.cloneNode(true);
-                profileBtn.parentNode.replaceChild(newBtn, profileBtn);
-                
-                newBtn.addEventListener('click', function() {
-                    console.log('🐛 Profile button clicked!');
-                    if (window.isSignedInMode) {
-                        console.log('🐛 Calling editProfile()');
-                        editProfile();
-                    } else {
-                        console.log('🐛 Calling showSignUpModal()');
-                        showSignUpModal();
-                    }
-                });
-                
-                console.log('🐛 Clean profile button listener added');
-            }
+            console.log('🐛 DOM loaded, setting up profile button');
+            
+            setTimeout(() => {
+                const profileBtn = document.getElementById('openProfileBtn');
+                if (profileBtn) {
+                    console.log('🐛 Profile button found:', profileBtn);
+                    
+                    // Remove all existing listeners and add a clean one
+                    const newBtn = profileBtn.cloneNode(true);
+                    newBtn.id = 'openProfileBtn'; // Ensure ID is preserved
+                    profileBtn.parentNode.replaceChild(newBtn, profileBtn);
+                    
+                    newBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('🐛 Profile button clicked! Mode:', window.isSignedInMode);
+                        
+                        if (window.isSignedInMode) {
+                            console.log('🐛 Calling editProfile()');
+                            if (typeof editProfile === 'function') {
+                                editProfile();
+                            } else {
+                                console.error('🐛 editProfile function not found!');
+                            }
+                        } else {
+                            console.log('🐛 Calling showSignUpModal()');
+                            if (typeof showSignUpModal === 'function') {
+                                showSignUpModal();
+                            } else {
+                                console.error('🐛 showSignUpModal function not found!');
+                            }
+                        }
+                    });
+                    
+                    console.log('🐛 Clean profile button listener added');
+                } else {
+                    console.error('🐛 Profile button not found!');
+                }
+            }, 1000); // Wait 1 second for everything to load
         });
+        
+        // Debug avatar issues
+        function fixAvatarUrls() {
+            const avatars = document.querySelectorAll('#navUserAvatar, #composerAvatar, #sidebarAvatar');
+            avatars.forEach(avatar => {
+                if (avatar.src && avatar.src.includes('localhost:8001')) {
+                    console.warn('🐛 Found localhost avatar, clearing:', avatar.src);
+                    avatar.src = 'https://via.placeholder.com/40x40/007bff/ffffff?text=U';
+                    avatar.alt = 'User Avatar';
+                }
+            });
+        }
+        
+        // Run avatar fix every 2 seconds
+        setInterval(fixAvatarUrls, 2000);
     </script>
 </body>
 </html>
