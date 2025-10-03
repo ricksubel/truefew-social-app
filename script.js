@@ -643,7 +643,7 @@ async function submitSignIn() {
         const userDoc = await db.collection('users').doc(user.uid).get();
         if (userDoc.exists) {
             currentUser = { uid: user.uid, ...userDoc.data() };
-            updateNavbarForSignedInUser();
+            // Note: updateNavbarForSignedInUser() will be called automatically by auth state listener
             showDashboard();
             showNotification(`Welcome back, ${currentUser.fullName}!`, 'success');
         } else {
@@ -858,15 +858,16 @@ function declineFriendRequest(requesterId) {
     showNotification('Friend request declined.', 'info');
 }
 
-// Global variable to track profile button mode
+// Global variable to track profile button mode and navbar state
 let isSignedInMode = false;
-let lastNavbarUpdate = 0;
+let navbarUpdateInProgress = false;
 
 /**
  * Universal profile button handler
  * Routes to correct function based on user sign-in state
  */
 function handleProfileButtonClick() {
+    console.log('Profile button clicked, mode:', isSignedInMode ? 'Edit Profile' : 'Create Profile');
     if (isSignedInMode) {
         editProfile();
     } else {
@@ -875,24 +876,24 @@ function handleProfileButtonClick() {
 }
 // UI Update Functions
 function updateNavbarForSignedInUser() {
-    // Throttle rapid calls to prevent conflicts
-    const now = Date.now();
-    if (now - lastNavbarUpdate < 100) {
-        console.log('Throttling navbar update, too recent');
+    // Prevent concurrent updates
+    if (navbarUpdateInProgress) {
+        console.log('Navbar update already in progress, skipping');
         return;
     }
-    lastNavbarUpdate = now;
+    navbarUpdateInProgress = true;
     
     try {
-        console.log('Updating navbar for signed-in user:', currentUser?.fullName);
+        console.log('🔄 Updating navbar for signed-in user:', currentUser?.fullName);
         
-        // Set mode flag
+        // Set mode flag FIRST
         isSignedInMode = true;
         
         // Update button appearance
         const openProfileBtn = document.getElementById('openProfileBtn');
         if (openProfileBtn) {
             openProfileBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Profile';
+            console.log('✅ Button updated to Edit Profile');
         }
         
         // Hide sign-in button
@@ -907,48 +908,48 @@ function updateNavbarForSignedInUser() {
             userNavArea.setAttribute('style', 'display: flex !important;');
         }
         
-        // Update user avatar and username with retry mechanism
+        // Update user avatar and username with improved reliability
         const navUserAvatar = document.getElementById('navUserAvatar');
         const navUsername = document.getElementById('navUsername');
         
         if (navUserAvatar && currentUser && currentUser.avatar) {
-            // Set avatar with error handling and retry
-            navUserAvatar.onerror = function() {
-                console.warn('Avatar failed to load, retrying...');
-                setTimeout(() => {
-                    navUserAvatar.src = currentUser.avatar;
-                }, 100);
-            };
+            console.log('🖼️ Setting navbar avatar to:', currentUser.avatar);
             navUserAvatar.src = currentUser.avatar;
-            console.log('Set avatar to:', currentUser.avatar);
             
-            // Force image load with a small delay to ensure it sticks
+            // Verify it was set correctly
             setTimeout(() => {
                 if (navUserAvatar.src !== currentUser.avatar) {
-                    console.log('Re-setting avatar after delay');
+                    console.warn('⚠️ Avatar not set correctly, retrying...');
                     navUserAvatar.src = currentUser.avatar;
                 }
-            }, 200);
+            }, 100);
         }
         
         if (navUsername && currentUser && currentUser.username) {
             navUsername.textContent = `@${currentUser.username}`;
         }
         
+        console.log('✅ Navbar update completed for signed-in state');
+        
     } catch (error) {
-        console.error('Error updating navbar for signed-in user:', error);
+        console.error('❌ Error updating navbar for signed-in user:', error);
+    } finally {
+        navbarUpdateInProgress = false;
     }
 }
 
 function updateNavbarForSignedOutUser() {
     try {
-        // Set mode flag
+        console.log('🔄 Updating navbar for signed-out user');
+        
+        // Set mode flag FIRST
         isSignedInMode = false;
         
         // Update button appearance
         const openProfileBtn = document.getElementById('openProfileBtn');
         if (openProfileBtn) {
             openProfileBtn.innerHTML = '<i class="bi bi-person-plus"></i> Create Profile';
+            console.log('✅ Button updated to Create Profile');
         }
         
         // Show sign-in button
@@ -963,8 +964,10 @@ function updateNavbarForSignedOutUser() {
             userNavArea.setAttribute('style', 'display: none !important;');
         }
         
+        console.log('✅ Navbar update completed for signed-out state');
+        
     } catch (error) {
-        console.error('Error updating navbar for signed-out user:', error);
+        console.error('❌ Error updating navbar for signed-out user:', error);
     }
 }
 
