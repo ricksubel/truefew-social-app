@@ -9,13 +9,51 @@
  * - Interest-based user matching
  * - Real-time notifications
  * 
+ * Diagnostic note: global error capture inserted early for debugging persistent errors.
+ * Remove window.__tfErrorDiagnosticsAdded block when stable.
+ * 
  * @author TrueFew Team
  * @version 1.0.0
  */
 
 /* ===========================
+   DIAGNOSTIC ERROR CAPTURE (Temporary - early load)
+   =========================== */
+if (!window.__tfErrorDiagnosticsAdded) {
+    window.__tfErrorDiagnosticsAdded = true;
+    window.__tfErrors = [];
+    function __tfRecord(kind, message, source, lineno, colno, errorObj) {
+        const entry = {
+            ts: new Date().toISOString(),
+            kind,
+            message: message || (errorObj && errorObj.message) || 'Unknown',
+            source: source || (errorObj && errorObj.fileName) || '',
+            line: lineno || (errorObj && errorObj.lineNumber) || null,
+            column: colno || (errorObj && errorObj.columnNumber) || null,
+            stack: errorObj && errorObj.stack ? errorObj.stack.split('\n').slice(0, 8).join('\n') : null
+        };
+        window.__tfErrors.push(entry);
+        if (window.__tfErrors.length > 25) window.__tfErrors.shift();
+        console.warn(`📛 Captured ${kind}:`, entry.message, `@${entry.source}:${entry.line}:${entry.column}`);
+    }
+    window.addEventListener('error', (e) => __tfRecord('error', e.message, e.filename, e.lineno, e.colno, e.error));
+    window.addEventListener('unhandledrejection', (e) => {
+        const r = e.reason || {};
+        __tfRecord('unhandledrejection', r.message || String(r), r.fileName, r.lineNumber, r.columnNumber, r);
+    });
+    window.showLastErrors = () => { console.table(window.__tfErrors); return window.__tfErrors; };
+    window.copyErrors = () => {
+        try { navigator.clipboard.writeText(JSON.stringify(window.__tfErrors, null, 2)); console.log('✅ Copied error log'); }
+        catch { console.log('Copy failed. Errors:', window.__tfErrors); }
+    };
+    console.log('🩺 Early diagnostic error capture enabled. Use showLastErrors().');
+}
+
+/* ===========================
    GLOBAL VARIABLES
    =========================== */
+// Application build/version tag (manually bumped when deploying breaking UI changes)
+window.TRUEFEW_VERSION = '1.4.1';
 
 // Current authenticated user object
 let currentUser = null;
@@ -1592,39 +1630,46 @@ function sharePost(postId) {
 
 // Media Attachment Functions
 function updateAttachmentButtons() {
+    // Collect elements once; if not present (e.g., on landing page) exit safely
+    const photoBtn = document.getElementById('attachPhotoBtn');
+    const videoBtn = document.getElementById('attachVideoBtn');
+    const musicBtn = document.getElementById('attachMusicBtn');
+    const clearBtn = document.getElementById('clearAttachmentBtn');
+    if (!photoBtn || !videoBtn || !musicBtn || !clearBtn) return;
+
     // Reset all buttons to default state
-    document.getElementById('attachPhotoBtn').classList.remove('btn-success');
-    document.getElementById('attachPhotoBtn').classList.add('btn-outline-secondary');
-    document.getElementById('attachVideoBtn').classList.remove('btn-success');
-    document.getElementById('attachVideoBtn').classList.add('btn-outline-secondary');
-    document.getElementById('attachMusicBtn').classList.remove('btn-success');
-    document.getElementById('attachMusicBtn').classList.add('btn-outline-secondary');
-    
+    photoBtn.classList.remove('btn-success');
+    photoBtn.classList.add('btn-outline-secondary');
+    videoBtn.classList.remove('btn-success');
+    videoBtn.classList.add('btn-outline-secondary');
+    musicBtn.classList.remove('btn-success');
+    musicBtn.classList.add('btn-outline-secondary');
+
     // Update button text to default
-    document.getElementById('attachPhotoBtn').innerHTML = '<i class="bi bi-image"></i> Photo';
-    document.getElementById('attachVideoBtn').innerHTML = '<i class="bi bi-play-circle"></i> Video';
-    document.getElementById('attachMusicBtn').innerHTML = '<i class="bi bi-music-note"></i> Music';
-    
+    photoBtn.innerHTML = '<i class="bi bi-image"></i> Photo';
+    videoBtn.innerHTML = '<i class="bi bi-play-circle"></i> Video';
+    musicBtn.innerHTML = '<i class="bi bi-music-note"></i> Music';
+
     // Hide clear button by default
-    document.getElementById('clearAttachmentBtn').style.display = 'none';
-    
+    clearBtn.style.display = 'none';
+
     // Highlight the appropriate button if media is attached
     if (attachedMedia) {
         // Show clear button when attachment exists
-        document.getElementById('clearAttachmentBtn').style.display = 'inline-block';
-        
+        clearBtn.style.display = 'inline-block';
+
         if (attachedMedia.type === 'image') {
-            document.getElementById('attachPhotoBtn').classList.remove('btn-outline-secondary');
-            document.getElementById('attachPhotoBtn').classList.add('btn-success');
-            document.getElementById('attachPhotoBtn').innerHTML = '<i class="bi bi-check-circle"></i> Photo Attached';
+            photoBtn.classList.remove('btn-outline-secondary');
+            photoBtn.classList.add('btn-success');
+            photoBtn.innerHTML = '<i class="bi bi-check-circle"></i> Photo Attached';
         } else if (attachedMedia.type === 'video') {
-            document.getElementById('attachVideoBtn').classList.remove('btn-outline-secondary');
-            document.getElementById('attachVideoBtn').classList.add('btn-success');
-            document.getElementById('attachVideoBtn').innerHTML = '<i class="bi bi-check-circle"></i> Video Attached';
+            videoBtn.classList.remove('btn-outline-secondary');
+            videoBtn.classList.add('btn-success');
+            videoBtn.innerHTML = '<i class="bi bi-check-circle"></i> Video Attached';
         } else if (attachedMedia.type === 'music') {
-            document.getElementById('attachMusicBtn').classList.remove('btn-outline-secondary');
-            document.getElementById('attachMusicBtn').classList.add('btn-success');
-            document.getElementById('attachMusicBtn').innerHTML = '<i class="bi bi-check-circle"></i> Music Attached';
+            musicBtn.classList.remove('btn-outline-secondary');
+            musicBtn.classList.add('btn-success');
+            musicBtn.innerHTML = '<i class="bi bi-check-circle"></i> Music Attached';
         }
     }
 }
@@ -1768,7 +1813,12 @@ function attachMediaToPost() {
         };
         
         updateAttachmentButtons();
-        bootstrap.Modal.getInstance(document.getElementById('mediaModal')).hide();
+        // Safely hide modal if instance exists
+        const mediaModalEl = document.getElementById('mediaModal');
+        const mediaModalInstance = mediaModalEl ? bootstrap.Modal.getInstance(mediaModalEl) : null;
+        if (mediaModalInstance && typeof mediaModalInstance.hide === 'function') {
+            mediaModalInstance.hide();
+        }
         document.getElementById('mediaUrl').value = '';
         showToast(`${isVideo ? 'Video' : 'Music'} attached!`, 'success');
     }
@@ -2787,6 +2837,10 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Load demo data for news feed
     loadDemoData();
+
+    // Initialize (guarded) Firebase Analytics with error suppression so GA network blocks
+    // (e.g., by ad blockers) don't spam the console with Fetch failed loading errors.
+    initializeAnalytics();
     
     console.log('✅ TrueFew Social App Ready!');
 });
@@ -2795,11 +2849,17 @@ document.addEventListener('DOMContentLoaded', function() {
  * Initialize UI components and event listeners
  */
 function initializeUI() {
+    console.log(`Initializing UI (version ${window.TRUEFEW_VERSION}) – initializeNotifications type:`, typeof initializeNotifications);
     // Populate interests in sign-up modal
     populateInterests();
     
     // Set up notification system
-    initializeNotifications();
+    // Guard: provide stub if real implementation not yet loaded
+    if (typeof initializeNotifications === 'function') {
+        initializeNotifications();
+    } else {
+        console.warn('initializeNotifications() not defined – using no-op stub');
+    }
     
     // Set up tooltips if Tippy.js is available
     if (typeof tippy !== 'undefined') {
@@ -2808,4 +2868,162 @@ function initializeUI() {
     
     // Show landing page by default
     showLanding();
+}
+
+// (Removed duplicate late diagnostic block; early version now active.)
+
+/* ===========================
+   STUBS FOR MISSING INITIALIZERS (Hard Reload Safety)
+   =========================== */
+// Provide a graceful fallback if these functions weren't defined in earlier sections.
+// NOTE: Use window.* assignment instead of block-scoped function declarations inside conditionals
+// to guarantee availability across browsers (prevents ReferenceError on some engines after parsing).
+if (typeof window.initializeNotifications !== 'function') {
+    window.initializeNotifications = function() {
+        if (!document.getElementById('tfNotificationContainer')) {
+            const ctr = document.createElement('div');
+            ctr.id = 'tfNotificationContainer';
+            ctr.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px;max-width:360px;';
+            document.body.appendChild(ctr);
+        }
+        if (!window.__tfNotificationPatched) {
+            window.__tfNotificationPatched = true;
+            const original = window.showNotification;
+            const queue = [];
+            const MAX_ACTIVE = 4;
+            function renderQueue() {
+                const ctr = document.getElementById('tfNotificationContainer');
+                if (!ctr) return;
+                [...ctr.children].forEach(child => {
+                    const id = child.getAttribute('data-id');
+                    if (!queue.find(q => q.id === id && q.active)) child.remove();
+                });
+                queue.filter(q => q.active).forEach(item => {
+                    if (!ctr.querySelector(`[data-id="${item.id}"]`)) {
+                        const div = document.createElement('div');
+                        div.className = `alert alert-${item.type}`;
+                        div.style.cssText = 'margin:0;animation:fadeIn 0.25s ease-out';
+                        div.setAttribute('data-id', item.id);
+                        div.innerHTML = `<strong>${item.message}</strong>`;
+                        ctr.appendChild(div);
+                        setTimeout(() => { item.active = false; if (div.parentNode) div.remove(); }, item.duration);
+                    }
+                });
+            }
+            window.showNotification = function(message, type = 'success', duration = 3000) {
+                try { original(message, type, duration); } catch {}
+                const id = 'ntf_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+                queue.push({ id, message, type, duration, active: true });
+                const active = queue.filter(q => q.active);
+                if (active.length > MAX_ACTIVE) {
+                    const excess = active.length - MAX_ACTIVE;
+                    active.slice(0, excess).forEach(e => e.active = false);
+                }
+                renderQueue();
+            };
+            console.log('🔔 Notification system initialized (enhanced queue, global assignment)');
+        }
+    };
+}
+
+if (typeof window.loadDemoData !== 'function') {
+    window.loadDemoData = function() {
+        if (typeof loadSampleData === 'function') {
+            try { loadSampleData(); } catch (e) { console.warn('loadDemoData: loadSampleData failed', e); }
+        }
+        try {
+            if (typeof loadPostsFeed === 'function') loadPostsFeed();
+            if (typeof loadNewsFeed === 'function') loadNewsFeed();
+        } catch (err) {
+            console.warn('loadDemoData encountered an error while refreshing feeds:', err);
+        }
+        console.log('ℹ️ Demo data load pass complete');
+    };
+}
+
+/* ===========================
+   ANALYTICS INITIALIZATION (Guarded + Error Suppression)
+   =========================== */
+function initializeAnalytics() {
+    if (window.__tfAnalyticsInitStarted) return; // idempotent
+    window.__tfAnalyticsInitStarted = true;
+    if (typeof firebase === 'undefined') { return; }
+    if (typeof firebase.analytics === 'undefined') { console.log('ℹ️ Firebase analytics SDK not loaded (skipping).'); return; }
+    try {
+        firebase.analytics.isSupported().then(supported => {
+            if (!supported) {
+                console.log('ℹ️ Analytics not supported in this environment.');
+                return;
+            }
+            try {
+                firebase.analytics();
+                suppressAnalyticsNetworkErrors();
+                console.log('✅ Analytics initialized with suppression.');
+            } catch (inner) {
+                console.log('⚠️ Analytics init error (suppressed):', inner.message || inner);
+            }
+        }).catch(err => {
+            console.log('⚠️ Analytics support check failed (ignored):', err.message || err);
+        });
+    } catch (err) {
+        console.log('⚠️ Analytics outer init exception (ignored):', err.message || err);
+    }
+}
+
+function suppressAnalyticsNetworkErrors() {
+    if (window.__tfGASuppression) return;
+    window.__tfGASuppression = true;
+    // Patch fetch for GA g/collect failures (common with ad blockers)
+    if (window.fetch) {
+        const origFetch = window.fetch;
+        window.fetch = function(...args) {
+            const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+            if (url.includes('google-analytics.com/g/collect')) {
+                return origFetch.apply(this, args).catch(() => {
+                    // Return a benign empty response so caller resolves without console error
+                    return new Response(null, { status: 204, statusText: 'No Content (suppressed)' });
+                });
+            }
+            return origFetch.apply(this, args);
+        };
+    }
+    // Patch sendBeacon similarly
+    if (navigator && navigator.sendBeacon) {
+        const origBeacon = navigator.sendBeacon;
+        navigator.sendBeacon = function(url, data) {
+            try {
+                return origBeacon.call(this, url, data);
+            } catch (e) {
+                if (url && url.includes('google-analytics.com/g/collect')) {
+                    console.log('ℹ️ GA beacon blocked (suppressed).');
+                    return true; // Pretend success
+                }
+                throw e;
+            }
+        };
+    }
+    console.log('🛡️ GA network error suppression active');
+}
+
+/* ===========================
+   DIAGNOSTIC FALLBACK (Ensures showLastErrors exists)
+   =========================== */
+if (typeof window !== 'undefined') {
+    if (typeof window.showLastErrors === 'undefined') {
+        window.showLastErrors = function() {
+            console.warn('[Diagnostic Fallback] Primary diagnostic block not found or not executed.');
+            console.warn('Possible causes: (1) Cached old script, (2) Early parse/runtime error before diagnostics, (3) Script not loaded yet.');
+            console.warn('Check: view-source, search for "Early diagnostic error capture".');
+            console.warn('If missing, force hard reload (Cmd+Shift+R) and ensure script tag has a new version query param.');
+            return window.__tfErrors || [];
+        };
+    }
+    if (typeof window.copyErrors === 'undefined') {
+        window.copyErrors = function() {
+            const errs = window.__tfErrors || [];
+            try { navigator.clipboard.writeText(JSON.stringify(errs, null, 2)); console.log('Copied fallback errors'); }
+            catch { console.log('Fallback errors (manual copy):', errs); }
+        };
+    }
+    console.log(`🩺 Diagnostic integrity check: showLastErrors=${typeof window.showLastErrors}, __tfErrors entries=${(window.__tfErrors&&window.__tfErrors.length)||0}`);
 }
