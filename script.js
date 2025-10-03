@@ -179,6 +179,12 @@ function initializeApp() {
             console.log(`Auto-login successful for user: ${currentUser.username}`);
             updateNavbarForSignedInUser();
             showDashboard();
+        } else {
+            // Initialize profile button for signed-out state
+            const openProfileBtn = document.getElementById('openProfileBtn');
+            if (openProfileBtn) {
+                openProfileBtn.addEventListener('click', showSignUpModal);
+            }
         }
         
     } catch (error) {
@@ -312,7 +318,7 @@ function setupEventListeners() {
         
         // Check if elements exist before adding listeners (prevents errors)
         if (openSearchBtn) openSearchBtn.addEventListener('click', showSearchModal);
-        if (openProfileBtn) openProfileBtn.addEventListener('click', showSignUpModal);
+        // Note: openProfileBtn listener is managed dynamically in navbar update functions
         if (openSignInBtn) openSignInBtn.addEventListener('click', showSignInModal);
         if (signOutBtn) signOutBtn.addEventListener('click', signOut);
         if (heroCTA) heroCTA.addEventListener('click', showSignUpModal);
@@ -855,12 +861,14 @@ function updateNavbarForSignedInUser() {
     const openProfileBtn = document.getElementById('openProfileBtn');
     
     document.getElementById('openSignInBtn').style.display = 'none';
-    openProfileBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Profile';
     
-    // Remove the old event listener to prevent conflicts
-    openProfileBtn.removeEventListener('click', showSignUpModal);
-    // Add the new event listener for edit profile
-    openProfileBtn.addEventListener('click', editProfile);
+    // Clone the button to remove all event listeners
+    const newBtn = openProfileBtn.cloneNode(true);
+    openProfileBtn.parentNode.replaceChild(newBtn, openProfileBtn);
+    
+    // Update content and add correct event listener
+    newBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Profile';
+    newBtn.addEventListener('click', editProfile);
     
     // Override the !important declaration by setting the style attribute directly
     document.getElementById('userNavArea').setAttribute('style', 'display: flex !important;');
@@ -872,12 +880,14 @@ function updateNavbarForSignedOutUser() {
     const openProfileBtn = document.getElementById('openProfileBtn');
     
     document.getElementById('openSignInBtn').style.display = 'inline-block';
-    openProfileBtn.innerHTML = '<i class="bi bi-person-plus"></i> Create Profile';
     
-    // Remove the edit profile event listener
-    openProfileBtn.removeEventListener('click', editProfile);
-    // Add back the sign up modal event listener
-    openProfileBtn.addEventListener('click', showSignUpModal);
+    // Clone the button to remove all event listeners
+    const newBtn = openProfileBtn.cloneNode(true);
+    openProfileBtn.parentNode.replaceChild(newBtn, openProfileBtn);
+    
+    // Update content and add correct event listener
+    newBtn.innerHTML = '<i class="bi bi-person-plus"></i> Create Profile';
+    newBtn.addEventListener('click', showSignUpModal);
     
     // Override the !important declaration by setting the style attribute directly
     document.getElementById('userNavArea').setAttribute('style', 'display: none !important;');
