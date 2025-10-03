@@ -2520,16 +2520,25 @@ function submitEditProfile() {
                 users[userIndex] = { ...currentUser };
             }
             
-            // Save to localStorage and update UI
-            localStorage.setItem('users', JSON.stringify(users));
-            localStorage.setItem('currentUser', JSON.stringify(currentUser));
-            updateNavbar();
-            populateUserList();
+            // Save to storage
+            saveDataToStorage();
             
-            // Close modal and show success
-            const editModal = bootstrap.Modal.getInstance(document.getElementById('editProfileModal'));
-            editModal.hide();
-            alert('Profile updated successfully!');
+            // Update UI
+            updateNavbarForSignedInUser();
+            updateDashboardContent();
+            
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
+            
+            // Show success message
+            showToast('Profile updated successfully!', 'success');
+            
+            // Refresh current page
+            if (currentPage === 'dashboard') {
+                showDashboard();
+            } else if (currentPage === 'profile') {
+                showProfile('current');
+            }
         };
         reader.readAsDataURL(imageFile);
         return; // Exit here to let the FileReader handle the rest
