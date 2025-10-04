@@ -919,6 +919,51 @@ async function resendVerificationEmail() {
     }
 }
 
+/**
+ * Request verification email for a user (from sign-in modal)
+ * Attempts to sign in temporarily to send verification email
+ */
+async function requestVerificationEmail() {
+    try {
+        const email = document.getElementById('signInUsername').value.trim();
+        const password = document.getElementById('signInPassword').value.trim();
+        
+        if (!email || !password) {
+            showNotification('Please enter your email and password to resend verification.', 'warning');
+            return;
+        }
+        
+        // Temporarily sign in to access user object
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        if (user.emailVerified) {
+            showNotification('Your email is already verified! You can sign in normally.', 'info');
+            await auth.signOut();
+            return;
+        }
+        
+        // Send verification email
+        await user.sendEmailVerification();
+        showNotification(`Verification email sent to ${email}. Please check your inbox and spam folder.`, 'success');
+        
+        // Sign out immediately
+        await auth.signOut();
+        
+    } catch (error) {
+        console.error('Request verification error:', error);
+        if (error.code === 'auth/user-not-found') {
+            showNotification('No account found with this email address.', 'danger');
+        } else if (error.code === 'auth/wrong-password') {
+            showNotification('Incorrect password. Please check your password and try again.', 'danger');
+        } else if (error.code === 'auth/too-many-requests') {
+            showNotification('Too many verification emails sent. Please wait before requesting another.', 'warning');
+        } else {
+            showNotification(error.message || 'Failed to send verification email.', 'danger');
+        }
+    }
+}
+
 // Authentication Functions
 /**
  * Enhanced Sign Up with Firebase Authentication and Email Verification
@@ -966,21 +1011,34 @@ async function submitSignUp() {
         // Prepare avatar (always store a stable data URL or generated placeholder; never a blob: URL)
         let avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&size=150&background=667eea&color=fff`;
         if (imageFile) {
-            avatarUrl = await new Promise((resolve, reject) => {
-                const r = new FileReader();
-                r.onload = e => {
-                    const result = e.target.result;
-                    // Ensure result is a data URL (starts with data:). If not, fall back to placeholder
-                    if (typeof result === 'string' && result.startsWith('data:')) {
-                        resolve(result);
-                    } else {
-                        console.warn('Avatar file did not produce data URL, using fallback.');
-                        resolve(avatarUrl);
-                    }
-                };
-                r.onerror = err => reject(err);
-                r.readAsDataURL(imageFile);
-            });
+            try {
+                showNotification('Processing profile image...', 'info', 1500);
+                
+                // Resize image to reduce storage size
+                const resizedBlob = await resizeImage(imageFile, 400, 400, 0.8);
+                
+                avatarUrl = await new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = e => {
+                        const result = e.target.result;
+                        // Ensure result is a data URL (starts with data:). If not, fall back to placeholder
+                        if (typeof result === 'string' && result.startsWith('data:')) {
+                            const sizeKB = (result.length * 0.75 / 1024).toFixed(1); // Rough base64 size estimate
+                            tfDebug('Compressed avatar size: ~' + sizeKB + 'KB');
+                            resolve(result);
+                        } else {
+                            console.warn('Avatar file did not produce data URL, using fallback.');
+                            resolve(avatarUrl);
+                        }
+                    };
+                    r.onerror = err => reject(err);
+                    r.readAsDataURL(resizedBlob);
+                });
+            } catch (error) {
+                console.error('Image processing failed:', error);
+                showNotification('Image processing failed. Using default avatar.', 'warning');
+                // Keep the default avatarUrl
+            }
         }
         // Final guard against accidental blob: or empty string
         if (!avatarUrl || avatarUrl.startsWith('blob:')) {
@@ -2101,28 +2159,96 @@ function previewPhoto() {
 
 function previewProfileImage() {
     const file = document.getElementById('signUpImage').files[0];
-    // In a real app, you would handle the file upload here
-    tfDebug('Profile image selected:', file?.name);
-}
-
-function attachPhotoToPost() {
-    const file = document.getElementById('postPhoto').files[0];
     if (file) {
-        // Convert image to base64 so it persists if saved to storage
+        // Check file size (warn if over 5MB before compression)
+        if (file.size > 5 * 1024 * 1024) {
+            showNotification('Large image detected. Compressing for optimal performance...', 'info', 2000);
+        }
+        
+        // Preview the image
         const reader = new FileReader();
         reader.onload = function(e) {
-            attachedMedia = {
-                type: 'image',
-                url: e.target.result,
-                title: file.name
-            };
-            updateAttachmentButtons();
-            const modalEl = document.getElementById('photoModal');
-            const modalInstance = bootstrap.Modal.getInstance(modalEl);
-            if (modalInstance) modalInstance.hide();
-            showToast('Photo attached!', 'success');
+            const preview = document.getElementById('signUpImagePreview');
+            if (preview) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            }
         };
         reader.readAsDataURL(file);
+        
+        tfDebug('Profile image selected:', file.name, 'Size:', (file.size / 1024).toFixed(1) + 'KB');
+    }
+}
+
+// Image resizing utility function
+function resizeImage(file, maxWidth = 400, maxHeight = 400, quality = 0.8) {
+    return new Promise((resolve) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.onload = function() {
+            // Calculate new dimensions while maintaining aspect ratio
+            let { width, height } = img;
+            
+            if (width > height) {
+                if (width > maxWidth) {
+                    height = (height * maxWidth) / width;
+                    width = maxWidth;
+                }
+            } else {
+                if (height > maxHeight) {
+                    width = (width * maxHeight) / height;
+                    height = maxHeight;
+                }
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Draw and compress the image
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // Convert to blob with compression
+            canvas.toBlob(resolve, 'image/jpeg', quality);
+        };
+        
+        img.src = URL.createObjectURL(file);
+    });
+}
+
+async function attachPhotoToPost() {
+    const file = document.getElementById('postPhoto').files[0];
+    if (file) {
+        try {
+            showNotification('Processing image...', 'info', 1000);
+            
+            // Resize image for posts (larger size allowed, but still compressed)
+            const resizedBlob = await resizeImage(file, 800, 600, 0.85);
+            
+            // Convert resized image to base64 so it persists if saved to storage
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                attachedMedia = {
+                    type: 'image',
+                    url: e.target.result,
+                    title: file.name
+                };
+                
+                const sizeKB = (e.target.result.length * 0.75 / 1024).toFixed(1);
+                tfDebug('Compressed post image size: ~' + sizeKB + 'KB');
+                
+                updateAttachmentButtons();
+                const modalEl = document.getElementById('photoModal');
+                const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                if (modalInstance) modalInstance.hide();
+                showToast('Photo attached!', 'success');
+            };
+            reader.readAsDataURL(resizedBlob);
+        } catch (error) {
+            console.error('Image processing failed:', error);
+            showNotification('Image processing failed. Please try a different image.', 'danger');
+        }
     }
 }
 
@@ -2920,7 +3046,7 @@ function toggleEditInterest(interest) {
     }
 }
 
-function submitEditProfile() {
+async function submitEditProfile() {
     if (!currentUser) return;
     
     const fullName = document.getElementById('editFullName').value.trim();
@@ -2987,65 +3113,78 @@ function submitEditProfile() {
     
     // Update avatar if new image was selected
     if (imageFile) {
-        // Convert image to base64 for persistent storage
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const result = e.target.result;
-            if (typeof result === 'string' && result.startsWith('data:')) {
-                currentUser.avatar = result;
-            } else {
-                console.warn('Edit profile avatar did not return data URL; keeping previous avatar');
-            }
+        try {
+            showNotification('Processing profile image...', 'info', 1500);
             
-            // Update the user in the users array
-            const userIndex = users.findIndex(u => u.id === currentUser.id);
-            if (userIndex !== -1) {
-                users[userIndex] = { ...currentUser };
-            }
+            // Resize image to reduce storage size
+            const resizedBlob = await resizeImage(imageFile, 400, 400, 0.8);
             
-            // Save to storage
-            saveDataToStorage();
-            
-            // Sync to Firestore if authenticated
-            if (currentUser.uid && typeof db !== 'undefined') {
-                (async () => {
-                    try {
-                        await db.collection('users').doc(currentUser.uid).update({
-                            fullName: currentUser.fullName,
-                            username: currentUser.username,
-                            email: currentUser.email,
-                            city: currentUser.city,
-                            state: currentUser.state,
-                            country: currentUser.country,
-                            interests: currentUser.interests,
-                            avatar: currentUser.avatar,
-                            updatedAt: new Date().toISOString()
-                        });
-                    } catch (err) {
-                        console.error('❌ Firestore update failed (image path):', err);
-                        showNotification('Profile saved locally. Cloud sync failed.', 'warning');
-                    }
-                })();
-            }
-            // Update UI
-            updateNavbarForSignedInUser();
-            updateDashboardContent();
-            
-            // Close modal
-            bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
-            
-            // Show success message
-            showToast('Profile updated successfully!', 'success');
-            
-            // Refresh current page
-            if (currentPage === 'dashboard') {
-                showDashboard();
-            } else if (currentPage === 'profile') {
-                showProfile('current');
-            }
-        };
-        reader.readAsDataURL(imageFile);
-        return; // Exit here to let the FileReader handle the rest
+            // Convert resized image to base64 for persistent storage
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const result = e.target.result;
+                if (typeof result === 'string' && result.startsWith('data:')) {
+                    currentUser.avatar = result;
+                    const sizeKB = (result.length * 0.75 / 1024).toFixed(1); // Rough base64 size estimate
+                    tfDebug('Compressed avatar size: ~' + sizeKB + 'KB');
+                } else {
+                    console.warn('Edit profile avatar did not return data URL; keeping previous avatar');
+                }
+                
+                // Update the user in the users array
+                const userIndex = users.findIndex(u => u.id === currentUser.id);
+                if (userIndex !== -1) {
+                    users[userIndex] = { ...currentUser };
+                }
+                
+                // Save to storage
+                saveDataToStorage();
+                
+                // Sync to Firestore if authenticated
+                if (currentUser.uid && typeof db !== 'undefined') {
+                    (async () => {
+                        try {
+                            await db.collection('users').doc(currentUser.uid).update({
+                                fullName: currentUser.fullName,
+                                username: currentUser.username,
+                                email: currentUser.email,
+                                city: currentUser.city,
+                                state: currentUser.state,
+                                country: currentUser.country,
+                                interests: currentUser.interests,
+                                avatar: currentUser.avatar,
+                                updatedAt: new Date().toISOString()
+                            });
+                        } catch (err) {
+                            console.error('❌ Firestore update failed (image path):', err);
+                            showNotification('Profile saved locally. Cloud sync failed.', 'warning');
+                        }
+                    })();
+                }
+                // Update UI
+                updateNavbarForSignedInUser();
+                updateDashboardContent();
+                
+                // Close modal
+                bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
+                
+                // Show success message
+                showToast('Profile updated successfully!', 'success');
+                
+                // Refresh current page
+                if (currentPage === 'dashboard') {
+                    showDashboard();
+                } else if (currentPage === 'profile') {
+                    showProfile('current');
+                }
+            };
+            reader.readAsDataURL(resizedBlob);
+            return; // Exit here to let the FileReader handle the rest
+        } catch (error) {
+            console.error('Image processing failed:', error);
+            showNotification('Image processing failed. Keeping current avatar.', 'warning');
+            // Continue with profile update without changing avatar
+        }
     }
     
     // Handle normal profile update without image
