@@ -108,6 +108,9 @@ let posts = [];
 // Messages organized by conversation ID (format: "userId1_userId2")
 let messages = {};
 
+// Track which sidebar modal is currently open
+let currentOpenModal = null;
+
 // Per-user news interest subscriptions (was previously referenced before being declared)
 // Structure: { [userId: string]: string[] } where array contains interest/category names
 // Missing declaration caused ReferenceError inside saveDataToStorage(), aborting post persistence.
@@ -120,6 +123,112 @@ let selectedInterests = [];
 
 // Currently attached media for post composition
 let attachedMedia = null;
+
+/* ===========================
+   URL ROUTING SYSTEM
+   =========================== */
+
+/**
+ * URL Router for clean URLs
+ * Handles routes: /home, /dashboard, /username
+ */
+class URLRouter {
+    constructor() {
+        this.setupPopstateListener();
+    }
+
+    /**
+     * Navigate to a specific route and update URL
+     * @param {string} path - The path to navigate to
+     * @param {boolean} replace - Whether to replace current history entry
+     */
+    navigate(path, replace = false) {
+        const url = window.location.origin + path;
+        if (replace) {
+            window.history.replaceState({ path }, '', url);
+        } else {
+            window.history.pushState({ path }, '', url);
+        }
+        this.handleRoute(path);
+    }
+
+    /**
+     * Handle route changes
+     * @param {string} path - The current path
+     */
+    handleRoute(path) {
+        console.log('🔄 Router handling path:', path);
+        
+        // Clean any existing query parameters from the URL
+        this.cleanURL();
+        
+        // Remove leading slash for consistency
+        const route = path.startsWith('/') ? path.slice(1) : path;
+        
+        if (!route || route === 'home') {
+            // Landing page
+            showLandingPage();
+        } else if (route === 'dashboard') {
+            // Dashboard page
+            if (currentUser) {
+                showDashboardPage();
+            } else {
+                // Redirect to home if not authenticated
+                this.navigate('/home', true);
+            }
+        } else {
+            // Assume it's a username route
+            const username = route;
+            if (currentUser) {
+                // Check if it's the current user's profile
+                if (username === currentUser.username) {
+                    showProfilePage('current');
+                } else {
+                    // Find user by username and show their profile
+                    const user = users.find(u => u.username === username);
+                    if (user) {
+                        showProfilePage(user.id);
+                    } else {
+                        // User not found, redirect to dashboard or home
+                        this.navigate(currentUser ? '/dashboard' : '/home', true);
+                    }
+                }
+            } else {
+                // Redirect to home if not authenticated
+                this.navigate('/home', true);
+            }
+        }
+    }
+
+    /**
+     * Clean URL by removing query parameters and hash fragments
+     */
+    cleanURL() {
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+    }
+
+    /**
+     * Listen for browser back/forward button
+     */
+    setupPopstateListener() {
+        window.addEventListener('popstate', (event) => {
+            const path = event.state?.path || window.location.pathname;
+            this.handleRoute(path);
+        });
+    }
+
+    /**
+     * Initialize router based on current URL
+     */
+    init() {
+        const currentPath = window.location.pathname;
+        this.handleRoute(currentPath);
+    }
+}
+
+// Create global router instance
+const router = new URLRouter();
 
 /* ===========================
    CONSTANTS & CONFIGURATION
@@ -211,6 +320,10 @@ let userNewsSubscriptions = {};
  * Sets up event listeners, loads data, and populates UI elements
  */
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('🔄 DOMContentLoaded - Page initialization starting');
+    console.log('🔄 Initial URL on page load:', window.location.href);
+    console.log('🔄 Initial navigation state on page load:', getNavigationState());
+    
     try {
         initializeApp();
         loadSampleData();
@@ -320,9 +433,11 @@ function populateInterests() {
     if (!grid) return;
     
     grid.innerHTML = '';
+    grid.className = 'row g-2 interests-form-section';
+    
     availableInterests.forEach((interest, index) => {
         const colDiv = document.createElement('div');
-        colDiv.className = 'col-md-3';
+        colDiv.className = 'col-md-6 col-lg-4';
         colDiv.innerHTML = `
             <div class="form-check">
                 <input type="checkbox" class="form-check-input" id="interest_${index}" value="${interest}" 
@@ -451,14 +566,45 @@ function initializeApp() {
     console.log('TrueFew Social App: Starting initialization...');
     
     try {
-        // Show landing page by default
-        showLanding();
+        // Initialize URL router
+        router.init();
+        
+        // Check if there's stored navigation state only on initial page load
+        const storedState = getNavigationState();
+        console.log('🔄 Stored navigation state during init:', storedState);
+        console.log('🔄 Is initial page load:', isInitialPageLoad);
+        
+        // Don't call showLanding() here - let the router handle initial navigation
+        // The router will determine the correct page based on URL
+        
+        // Don't reset isInitialPageLoad here - let Firebase auth handle it
         
         // Load saved user data from localStorage with error handling
         const savedUsers = localStorage.getItem('truefew_users');
         if (savedUsers) {
             users = JSON.parse(savedUsers);
             console.log(`Loaded ${users.length} users from storage`);
+            
+            // Migration: Update all seeded users to reliable RandomUser avatars if using old URLs
+            const avatarMigrations = [
+                { username: 'alexj', newAvatar: 'https://randomuser.me/api/portraits/men/1.jpg' },
+                { username: 'sarahc', newAvatar: 'https://randomuser.me/api/portraits/women/2.jpg' },
+                { username: 'mikez', newAvatar: 'https://randomuser.me/api/portraits/men/3.jpg' }
+            ];
+            
+            let migrationNeeded = false;
+            avatarMigrations.forEach(migration => {
+                const user = users.find(u => u.username === migration.username);
+                if (user && user.avatar && (user.avatar.includes('unsplash.com') || user.avatar.includes('ui-avatars.com') || user.avatar.includes('uifaces.co') || user.avatar.includes('generated.photos'))) {
+                    console.log(`Migrating ${user.fullName} avatar to RandomUser`);
+                    user.avatar = migration.newAvatar;
+                    migrationNeeded = true;
+                }
+            });
+            
+            if (migrationNeeded) {
+                localStorage.setItem('truefew_users', JSON.stringify(users));
+            }
         }
 
         // Load saved posts before possibly seeding sample data
@@ -504,7 +650,19 @@ function initializeApp() {
             }
             console.log(`Auto-login successful for user: ${currentUser.username}`);
             updateNavbarForSignedInUser();
-            showDashboard();
+            
+            // Check if we should restore navigation state (only on initial load)
+            const storedState = getNavigationState();
+            console.log('🔄 Auto-login - checking stored state:', storedState);
+            console.log('🔄 Auto-login - isInitialPageLoad:', isInitialPageLoad);
+            
+            if (isInitialPageLoad && storedState.page && storedState.page !== 'landing') {
+                console.log('🔄 Auto-login preserving stored navigation state on initial load');
+                // Let Firebase authentication handle the restoration
+            } else {
+                console.log('🔄 Auto-login showing dashboard');
+                showDashboard();
+            }
         }
         // Note: Profile button listener is set up in setupEventListeners() with universal handler
         
@@ -537,7 +695,8 @@ function loadSampleData() {
                 city: 'San Francisco',
                 state: 'California',
                 country: 'USA',
-                avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+                avatar: 'https://randomuser.me/api/portraits/men/1.jpg',
+                aboutMe: 'Tech enthusiast and music lover from the Bay Area. Always looking for the next adventure and great conversation!',
                 interests: ['Technology', 'Music', 'Travel', 'Photography', 'Gaming', 'Food', 'Movies', 'Sports'],
                 friends: [2, 3], // Friend IDs
                 friendRequests: [], // Pending friend request IDs
@@ -553,7 +712,8 @@ function loadSampleData() {
                 city: 'New York',
                 state: 'New York',
                 country: 'USA',
-                avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b5bc?w=150&h=150&fit=crop&crop=face',
+                avatar: 'https://randomuser.me/api/portraits/women/2.jpg',
+                aboutMe: 'Artist and fashion designer living in NYC. Passionate about creating beautiful things and exploring different cultures.',
                 interests: ['Art', 'Fashion', 'Music', 'Travel', 'Food', 'Books', 'Photography', 'Dancing'],
                 friends: [1], // Friend IDs
                 friendRequests: [3], // Pending friend request from Mike
@@ -569,7 +729,8 @@ function loadSampleData() {
                 city: 'Austin',
                 state: 'Texas',
                 country: 'USA',
-                avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
+                avatar: 'https://randomuser.me/api/portraits/men/3.jpg',
+                aboutMe: 'Fitness coach and sports enthusiast from Austin. Love staying active and helping others reach their goals!',
                 interests: ['Sports', 'Fitness', 'Music', 'Cars', 'Technology', 'Gaming', 'Movies', 'Food'],
                 friends: [1], // Friend IDs
                 friendRequests: [], // No pending requests
@@ -674,11 +835,19 @@ function setupEventListeners() {
         const publishPostBtn = document.getElementById('publishPost');
         if (publishPostBtn) publishPostBtn.addEventListener('click', publishPost);
         
+        // Edit post character counter
+        const editPostContent = document.getElementById('editPostContent');
+        if (editPostContent) {
+            editPostContent.addEventListener('input', updateEditPostCounter);
+        }
+        
         // File upload previews
         const postPhoto = document.getElementById('postPhoto');
         const signUpImage = document.getElementById('signUpImage');
+        const editPostPhoto = document.getElementById('editPostPhoto');
         if (postPhoto) postPhoto.addEventListener('change', previewPhoto);
         if (signUpImage) signUpImage.addEventListener('change', previewProfileImage);
+        if (editPostPhoto) editPostPhoto.addEventListener('change', editPreviewPhoto);
         
         // Form submissions with Enter key support
         document.addEventListener('keypress', function(e) {
@@ -723,11 +892,17 @@ function setupEventListeners() {
  * Prevents body scrolling for immersive hero experience
  */
 function showLanding() {
+    router.navigate('/home');
+}
+
+function showLandingPage() {
     hideAllPages();
     const landingPage = document.getElementById('landingPage');
     if (landingPage) {
         landingPage.style.display = 'block';
         currentPage = 'landing';
+        // Clear navigation state when returning to landing
+        setNavigationState('landing');
         // Prevent scrolling on landing page
         document.body.classList.add('landing-page');
     } else {
@@ -747,11 +922,22 @@ function showDashboard() {
         return;
     }
     
+    router.navigate('/dashboard');
+}
+
+function showDashboardPage() {
     hideAllPages();
+    
+    // Remove landing-page class to show background at 40% opacity
+    document.body.classList.remove('landing-page');
+    
     const dashboardPage = document.getElementById('dashboardPage');
     if (dashboardPage) {
         dashboardPage.style.display = 'block';
         currentPage = 'dashboard';
+        
+        // Store navigation state for refresh persistence
+        setNavigationState('dashboard');
         
         // Load dashboard content
         try {
@@ -774,14 +960,54 @@ function showDashboard() {
  * @param {number|string} userId - User ID or 'current' for logged-in user
  */
 function showProfile(userId) {
+    console.log('🔄 showProfile called with userId:', userId, 'type:', typeof userId);
+    
+    // Determine which user to show and get their username for URL
+    let user;
+    if (userId === 'current') {
+        user = currentUser;
+    } else {
+        // Try to find user by id first (numeric), then by uid (Firebase)
+        user = users.find(u => u.id == userId || u.uid === userId);
+    }
+    
+    if (user && user.username) {
+        router.navigate('/' + user.username);
+    } else {
+        console.error('User not found:', userId);
+        showNotification('User not found', 'danger');
+        // Redirect to dashboard if user not found
+        router.navigate('/dashboard');
+    }
+}
+
+function showProfilePage(userId) {
+    console.log('🔄 showProfilePage called with userId:', userId, 'type:', typeof userId);
+    console.log('🔄 Current URL before showProfilePage:', window.location.href);
+    
     hideAllPages();
     const profilePage = document.getElementById('profilePage');
     if (profilePage) {
         profilePage.style.display = 'block';
         currentPage = 'profile';
         
+        // Store navigation state for refresh persistence
+        setNavigationState('profile', userId);
+        
+        // Check URL immediately after setting state
+        console.log('🔄 URL after setNavigationState:', window.location.href);
+        
         // Determine which user to show
-        const user = userId === 'current' ? currentUser : users.find(u => u.id == userId);
+        let user;
+        if (userId === 'current') {
+            user = currentUser;
+        } else {
+            // Try to find user by id first (numeric), then by uid (Firebase)
+            user = users.find(u => u.id == userId || u.uid === userId);
+        }
+        
+        console.log('🔄 Found user for profile:', user ? user.fullName || user.email : 'Not found');
+        
         if (user) {
             populateProfilePage(user);
         } else {
@@ -791,6 +1017,13 @@ function showProfile(userId) {
     } else {
         console.error('Profile page element not found');
     }
+    
+    // Check URL at the very end of showProfilePage
+    setTimeout(() => {
+        console.log('🔄 Final URL after showProfilePage completion:', window.location.href);
+        const finalState = getNavigationState();
+        console.log('🔄 Final navigation state after showProfilePage:', finalState);
+    }, 10);
 }
 
 /**
@@ -816,6 +1049,115 @@ function hideAllPages() {
     } catch (error) {
         console.error('Error hiding pages:', error);
     }
+}
+
+// Global flag to prevent navigation state overwrite during restoration
+let isRestoringNavigationState = false;
+let isInitialPageLoad = true; // Track if this is the first page load
+
+/**
+ * Store navigation state in localStorage for refresh persistence
+ * Updated to use localStorage instead of URL parameters for clean URLs
+ * @param {string} page - The current page ('dashboard', 'profile', etc.)
+ * @param {string} userId - Optional user ID for profile views
+ */
+function setNavigationState(page, userId = null) {
+    // Don't overwrite navigation state if we're in the middle of restoring it
+    if (isRestoringNavigationState && page === 'landing') {
+        console.log('🔄 Blocked navigation state overwrite during restoration');
+        return;
+    }
+    
+    try {
+        // Log the call stack to see where this is being called from
+        const stack = new Error().stack;
+        const caller = stack.split('\n')[2];
+        console.log('🔄 setNavigationState called:', page, userId, 'from:', caller);
+        
+        // Store navigation state in localStorage for refresh persistence
+        const navigationState = {
+            page: page,
+            userId: userId,
+            timestamp: Date.now()
+        };
+        
+        localStorage.setItem('truefew_navigation_state', JSON.stringify(navigationState));
+        console.log('🔄 Navigation state stored:', navigationState);
+    } catch (error) {
+        console.error('Error setting navigation state:', error);
+    }
+}
+
+/**
+ * Get stored navigation state from localStorage
+ * @returns {object} Navigation state with page and userId
+ */
+function getNavigationState() {
+    try {
+        const stored = localStorage.getItem('truefew_navigation_state');
+        if (stored) {
+            const state = JSON.parse(stored);
+            console.log('Getting navigation state from localStorage:', state);
+            return state;
+        }
+        return { page: null, userId: null };
+    } catch (error) {
+        console.error('Error getting navigation state:', error);
+        return { page: null, userId: null };
+    }
+}
+
+/**
+ * Restore navigation state after authentication
+ * Called when user is authenticated to restore their previous view
+ * Now uses router for clean URL navigation
+ */
+function restoreNavigationState() {
+    const state = getNavigationState();
+    console.log('🔄 Attempting to restore navigation state:', state);
+    
+    if (state.page === 'profile' && state.userId) {
+        console.log('🔄 Restoring profile view for user:', state.userId);
+        
+        // Set flag to prevent overwriting during restoration
+        isRestoringNavigationState = true;
+        
+        // Use router to navigate to the appropriate username URL
+        let user;
+        if (state.userId === 'current') {
+            user = currentUser;
+        } else {
+            user = users.find(u => u.id == state.userId || u.uid === state.userId);
+        }
+        
+        if (user && user.username) {
+            router.navigate('/' + user.username, true);
+        } else {
+            // Fallback to dashboard if user not found
+            router.navigate('/dashboard', true);
+        }
+        
+        // Clear flag after a brief delay to allow restoration to complete
+        setTimeout(() => {
+            isRestoringNavigationState = false;
+            console.log('🔄 Navigation state restoration complete');
+        }, 100);
+        
+        return true; // Indicate successful restoration
+    } else if (state.page === 'dashboard') {
+        console.log('🔄 Restoring dashboard view');
+        
+        isRestoringNavigationState = true;
+        router.navigate('/dashboard', true);
+        setTimeout(() => {
+            isRestoringNavigationState = false;
+        }, 100);
+        
+        return true; // Indicate successful restoration
+    }
+    
+    console.log('🔄 No valid navigation state to restore');
+    return false; // Indicate no restoration happened
 }
 
 // Modal Functions
@@ -1064,6 +1406,7 @@ async function submitSignUp() {
             country,
             interests: selectedInterests,
             avatar: avatarUrl,
+            aboutMe: '', // Initialize aboutMe field
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             friends: [],
             friendRequests: [],
@@ -1108,16 +1451,32 @@ async function submitSignIn() {
         const userCredential = await auth.signInWithEmailAndPassword(email, password);
         const user = userCredential.user;
         
-        // Check if email is verified
-        if (!user.emailVerified) {
-            showNotification('Email not verified. We just re-sent the link (if allowed). Check your inbox/spam.', 'warning');
+        // Check if email is verified (with development bypass)
+        const isDevelopmentMode = localStorage.getItem('truefew_dev_mode') === 'true';
+        
+        if (!user.emailVerified && !isDevelopmentMode) {
+            console.error('Email verification failed. Tries left decreasing - likely Firebase email service issue.');
+            showNotification('Email not verified. Email service may be experiencing issues. Check console for dev bypass.', 'warning');
+            
+            // Log helpful info for debugging
+            console.log('🔧 DEVELOPER TIP: To bypass email verification for testing, run this in console:');
+            console.log('localStorage.setItem("truefew_dev_mode", "true"); location.reload();');
+            console.log('🔧 To re-enable verification: localStorage.removeItem("truefew_dev_mode"); location.reload();');
+            
             try {
                 await user.sendEmailVerification();
             } catch (err) {
                 console.warn('Resend verification failed or throttled:', err?.message);
+                console.error('Firebase email service error - 404 responses detected');
             }
             await auth.signOut();
             return;
+        }
+        
+        // Development mode active notification
+        if (isDevelopmentMode && !user.emailVerified) {
+            console.warn('⚠️ DEVELOPMENT MODE: Email verification bypassed for testing');
+            showNotification('DEV MODE: Email verification bypassed for testing', 'info', 2000);
         }
         
         // Load user profile from Firestore
@@ -1585,189 +1944,26 @@ function loadNewsFeed() {
     }
 }
 
-function loadPostsFeed() {
-    const postsFeed = document.getElementById('postsFeed');
-    postsFeed.innerHTML = '';
-    // Ensure we have the most recent persisted posts (covers reloads/races)
-    try {
-        const savedPosts = localStorage.getItem('truefew_posts');
-        if (savedPosts) {
-            const parsed = JSON.parse(savedPosts);
-            if (Array.isArray(parsed) && parsed.length >= posts.length) {
-                posts = parsed;
-            }
-        }
-    } catch {}
-    
-    if (posts.length === 0) {
-        postsFeed.innerHTML = `
-            <div class="text-center p-4 text-muted">
-                <i class="bi bi-chat-square-text fs-1 d-block mb-3"></i>
-                <h5>No posts yet</h5>
-                <p>Be the first to share something!</p>
-            </div>
-        `;
-        return;
-    }
-    
-    // Sort posts by timestamp (newest first)
-    const sortedPosts = posts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    
-    sortedPosts.forEach(post => {
-        let author = users.find(u => u.id == post.authorId);
-        // Fallback to current user if matches
-        if (!author && currentUser && (post.authorId == currentUser.id)) {
-            author = currentUser;
-        }
-        // If still no author (auth async race), create a lightweight placeholder so the
-        // post is visible immediately; it will be updated on next feed refresh.
-        if (!author) {
-            author = {
-                id: post.authorId,
-                fullName: 'Loading user…',
-                avatar: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
-            };
-        }
-        
-        const postElement = document.createElement('div');
-        postElement.className = 'post-item fade-in';
-        
-        const timeAgo = getTimeAgo(post.timestamp);
-        const isLiked = currentUser && currentUser.id && post.likes.includes(currentUser.id.toString());
-        
-        postElement.innerHTML = `
-            <div class="post-header">
-                <img src="${author.avatar}" alt="${author.fullName}" class="post-avatar cursor-pointer" onclick="showProfile(${author.id})">
-                <div>
-                    <div class="post-author cursor-pointer" onclick="showProfile(${author.id})">${author.fullName}</div>
-                    <div class="post-time">${timeAgo}</div>
-                </div>
-            </div>
-            <div class="post-content">${post.content}</div>
-            ${post.media ? `
-                <div class="post-media">
-                    ${post.media.type === 'image' ? 
-                        `<img src="${post.media.url}" alt="Post image" class="img-fluid rounded">` :
-                        post.media.type === 'news' ?
-                        `<div class="p-3 bg-light rounded border-start border-info border-3">
-                            <div class="d-flex align-items-center mb-2">
-                                <i class="bi bi-newspaper text-info me-2"></i>
-                                <strong class="text-info">News Article</strong>
-                            </div>
-                            <h6 class="mb-2">${post.media.title}</h6>
-                            <p class="text-muted mb-2">Source: ${post.media.source}</p>
-                            <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-info">
-                                <i class="bi bi-box-arrow-up-right me-1"></i>Read Full Article
-                            </a>
-                        </div>` :
-                        post.media.type === 'video' && post.media.service === 'youtube' ?
-                        `<div class="video-embed mb-3">
-                            <div class="ratio ratio-16x9">
-                                <iframe src="${post.media.embedUrl}" 
-                                        title="YouTube video player" 
-                                        frameborder="0" 
-                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                                        allowfullscreen
-                                        class="rounded">
-                                </iframe>
-                            </div>
-                            <div class="mt-2 d-flex justify-content-between align-items-center">
-                                <small class="text-muted">
-                                    <i class="bi bi-youtube text-danger me-1"></i>YouTube Video
-                                </small>
-                                <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
-                                    <i class="bi bi-box-arrow-up-right me-1"></i>Open in YouTube
-                                </a>
-                            </div>
-                        </div>` :
-                        post.media.type === 'music' && post.media.service === 'spotify' ?
-                        `<div class="music-embed mb-3">
-                            <iframe src="${post.media.embedUrl}" 
-                                    width="100%" 
-                                    height="152" 
-                                    frameborder="0" 
-                                    allowtransparency="true" 
-                                    allow="encrypted-media"
-                                    class="rounded">
-                            </iframe>
-                            <div class="mt-2 d-flex justify-content-between align-items-center">
-                                <small class="text-muted">
-                                    <i class="bi bi-spotify text-success me-1"></i>Spotify Track
-                                </small>
-                                <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-success">
-                                    <i class="bi bi-box-arrow-up-right me-1"></i>Open in Spotify
-                                </a>
-                            </div>
-                        </div>` :
-                        post.media.type === 'music' && post.media.service === 'apple' ?
-                        `<div class="music-embed mb-3">
-                            <iframe src="${post.media.embedUrl}" 
-                                    width="100%" 
-                                    height="175" 
-                                    frameborder="0" 
-                                    sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation" 
-                                    allow="autoplay *; encrypted-media *; fullscreen *; clipboard-write"
-                                    class="rounded">
-                            </iframe>
-                            <div class="mt-2 d-flex justify-content-between align-items-center">
-                                <small class="text-muted">
-                                    <i class="bi bi-music-note text-primary me-1"></i>Apple Music
-                                </small>
-                                <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-box-arrow-up-right me-1"></i>Open in Apple Music
-                                </a>
-                            </div>
-                        </div>` :
-                        `<div class="p-3 bg-light rounded">
-                            <i class="bi bi-${post.media.type === 'video' ? 'play-circle' : 'music-note'} me-2"></i>
-                            <a href="${post.media.url}" target="_blank">${post.media.title || 'Media Link'}</a>
-                        </div>`
-                    }
-                </div>
-            ` : ''}
-            <div class="post-actions">
-                <button class="post-action ${isLiked ? 'liked' : ''}" onclick="toggleLike(${post.id})">
-                    <i class="bi bi-heart${isLiked ? '-fill' : ''}"></i> ${post.likes.length}
-                </button>
-                <button class="post-action" onclick="toggleComments(${post.id})">
-                    <i class="bi bi-chat"></i> ${post.comments.length}
-                </button>
-                <button class="post-action" onclick="sharePost(${post.id})">
-                    <i class="bi bi-share"></i> ${post.shares}
-                </button>
-            </div>
-            <div id="comments_${post.id}" style="display: none;" class="mt-3">
-                ${post.comments.map(comment => {
-                    const commentAuthor = users.find(u => u.id == comment.authorId);
-                    return `
-                        <div class="d-flex mb-2">
-                            <img src="${commentAuthor.avatar}" class="rounded-circle me-2" style="width:30px;height:30px;object-fit:cover;">
-                            <div class="flex-grow-1">
-                                <strong>${commentAuthor.fullName}</strong>
-                                <span class="text-muted ms-2">${getTimeAgo(comment.timestamp)}</span>
-                                <div>${comment.content}</div>
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
-                <div class="d-flex mt-2">
-                    <img src="${currentUser.avatar}" class="rounded-circle me-2" style="width:30px;height:30px;object-fit:cover;">
-                    <div class="flex-grow-1">
-                        <input type="text" class="form-control form-control-sm" placeholder="Write a comment..." onkeypress="handleCommentSubmit(event, ${post.id})">
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        postsFeed.appendChild(postElement);
-    });
-}
-
 function populateProfilePage(user) {
     document.getElementById('profileAvatar').src = user.avatar;
     document.getElementById('profileFullName').textContent = user.fullName;
     document.getElementById('profileUsername').textContent = `@${user.username}`;
     document.getElementById('profileLocation').querySelector('span').textContent = `${user.city}, ${user.state}, ${user.country}`;
+    
+    // Populate About Me section if it exists
+    const aboutMeContainer = document.getElementById('profileAboutMe');
+    if (aboutMeContainer) {
+        if (user.aboutMe && user.aboutMe.trim()) {
+            aboutMeContainer.innerHTML = `
+                <div class="about-me-section">
+                    <p class="about-me-text">"${user.aboutMe}"</p>
+                </div>
+            `;
+            aboutMeContainer.style.display = 'block';
+        } else {
+            aboutMeContainer.style.display = 'none';
+        }
+    }
     
     // Populate interests
     const interestsContainer = document.getElementById('profileInterests');
@@ -1806,117 +2002,7 @@ function populateProfilePage(user) {
     
     // Load user's posts (only if user is signed in)
     if (currentUser) {
-        const userPosts = posts.filter(post => post.authorId === user.id);
-        const postsContainer = document.getElementById('profilePosts');
-        
-        if (userPosts.length === 0) {
-            postsContainer.innerHTML = `
-                <div class="text-center p-4 text-muted">
-                    <i class="bi bi-grid fs-1 d-block mb-3"></i>
-                    <h6>No posts yet</h6>
-                    ${currentUser && user.id === currentUser.id ? '<p>Share your first post!</p>' : '<p>This user hasn\'t posted anything yet.</p>'}
-                </div>
-            `;
-        } else {
-            postsContainer.innerHTML = '';
-            userPosts.forEach(post => {
-                const postElement = document.createElement('div');
-                postElement.className = 'post-item mb-3';
-                postElement.innerHTML = `
-                    <div class="post-content">${post.content}</div>
-                    ${post.media ? `
-                        <div class="post-media mt-2">
-                            ${post.media.type === 'image' ? 
-                                `<img src="${post.media.url}" alt="Post image" class="img-fluid rounded">` :
-                                post.media.type === 'news' ?
-                                `<div class="p-3 bg-light rounded border-start border-info border-3">
-                                    <div class="d-flex align-items-center mb-2">
-                                        <i class="bi bi-newspaper text-info me-2"></i>
-                                        <strong class="text-info">News Article</strong>
-                                    </div>
-                                    <h6 class="mb-2">${post.media.title}</h6>
-                                    <p class="text-muted mb-2">Source: ${post.media.source}</p>
-                                    <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-info">
-                                        <i class="bi bi-box-arrow-up-right me-1"></i>Read Full Article
-                                    </a>
-                                </div>` :
-                                post.media.type === 'video' && post.media.service === 'youtube' ?
-                                `<div class="video-embed mb-3">
-                                    <div class="ratio ratio-16x9">
-                                        <iframe src="${post.media.embedUrl}" 
-                                                title="YouTube video player" 
-                                                frameborder="0" 
-                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                                                allowfullscreen
-                                                class="rounded">
-                                        </iframe>
-                                    </div>
-                                    <div class="mt-2 d-flex justify-content-between align-items-center">
-                                        <small class="text-muted">
-                                            <i class="bi bi-youtube text-danger me-1"></i>YouTube Video
-                                        </small>
-                                        <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
-                                            <i class="bi bi-box-arrow-up-right me-1"></i>Open in YouTube
-                                        </a>
-                                    </div>
-                                </div>` :
-                                post.media.type === 'music' && post.media.service === 'spotify' ?
-                                `<div class="music-embed mb-3">
-                                    <iframe src="${post.media.embedUrl}" 
-                                            width="100%" 
-                                            height="152" 
-                                            frameborder="0" 
-                                            allowtransparency="true" 
-                                            allow="encrypted-media"
-                                            class="rounded">
-                                    </iframe>
-                                    <div class="mt-2 d-flex justify-content-between align-items-center">
-                                        <small class="text-muted">
-                                            <i class="bi bi-spotify text-success me-1"></i>Spotify Track
-                                        </small>
-                                        <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-success">
-                                            <i class="bi bi-box-arrow-up-right me-1"></i>Open in Spotify
-                                        </a>
-                                    </div>
-                                </div>` :
-                                post.media.type === 'music' && post.media.service === 'apple' ?
-                                `<div class="music-embed mb-3">
-                                    <iframe src="${post.media.embedUrl}" 
-                                            width="100%" 
-                                            height="175" 
-                                            frameborder="0" 
-                                            sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation" 
-                                            allow="autoplay *; encrypted-media *; fullscreen *; clipboard-write"
-                                            class="rounded">
-                                    </iframe>
-                                    <div class="mt-2 d-flex justify-content-between align-items-center">
-                                        <small class="text-muted">
-                                            <i class="bi bi-music-note text-primary me-1"></i>Apple Music
-                                        </small>
-                                        <a href="${post.media.url}" target="_blank" class="btn btn-sm btn-outline-primary">
-                                            <i class="bi bi-box-arrow-up-right me-1"></i>Open in Apple Music
-                                        </a>
-                                    </div>
-                                </div>` :
-                                `<div class="p-3 bg-light rounded">
-                                    <i class="bi bi-${post.media.type === 'video' ? 'play-circle' : 'music-note'} me-2"></i>
-                                    <a href="${post.media.url}" target="_blank">${post.media.title || 'Media Link'}</a>
-                                </div>`
-                            }
-                        </div>
-                    ` : ''}
-                    <div class="d-flex justify-content-between align-items-center mt-2 text-muted">
-                        <small>${getTimeAgo(post.timestamp)}</small>
-                        <div>
-                            <span class="me-3"><i class="bi bi-heart"></i> ${post.likes.length}</span>
-                            <span class="me-3"><i class="bi bi-chat"></i> ${post.comments.length}</span>
-                            <span><i class="bi bi-share"></i> ${post.shares}</span>
-                        </div>
-                    </div>
-                `;
-                postsContainer.appendChild(postElement);
-            });
-        }
+        loadUserProfilePosts(user);
     } else {
         // Hide posts for non-signed users
         const postsContainer = document.getElementById('profilePosts');
@@ -1928,6 +2014,126 @@ function populateProfilePage(user) {
             </div>
         `;
     }
+}
+
+/**
+ * Load user posts for profile page from Firebase
+ */
+async function loadUserProfilePosts(user) {
+    const postsContainer = document.getElementById('profilePosts');
+    
+    // Show loading state
+    postsContainer.innerHTML = '<div class="text-center p-4"><span class="loading-spinner"></span> Loading posts...</div>';
+    
+    try {
+        // Get posts from Firestore for this specific user
+        const snapshot = await db.collection('posts')
+            .where('authorId', '==', user.uid || user.id) // Handle both Firebase UID and legacy ID
+            .get();
+        
+        if (snapshot.empty) {
+            postsContainer.innerHTML = `
+                <div class="text-center p-4 text-muted">
+                    <i class="bi bi-grid fs-1 d-block mb-3"></i>
+                    <h6>No posts yet</h6>
+                    ${currentUser && (user.uid === currentUser.uid || user.id === currentUser.id) ? '<p>Share your first post!</p>' : '<p>This user hasn\'t posted anything yet.</p>'}
+                </div>
+            `;
+            return;
+        }
+        
+        // Convert to array and sort by timestamp (client-side sorting)
+        const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        posts.sort((a, b) => {
+            const timeA = a.timestamp && a.timestamp.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
+            const timeB = b.timestamp && b.timestamp.toDate ? b.timestamp.toDate() : new Date(b.timestamp);
+            return timeB - timeA; // Newest first
+        });
+        
+        postsContainer.innerHTML = '';
+        
+        posts.forEach(post => {
+            const postElement = createProfilePostElement(post, user);
+            postsContainer.appendChild(postElement);
+        });
+        
+    } catch (error) {
+        console.error('Error loading user posts:', error);
+        postsContainer.innerHTML = `
+            <div class="text-center p-4 text-danger">
+                <i class="bi bi-exclamation-triangle fs-1 d-block mb-3"></i>
+                <h5>Error loading posts</h5>
+                <p>Please refresh the page to try again.</p>
+                <p class="small text-muted">Error: ${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Create post element for profile page
+ */
+function createProfilePostElement(post, user) {
+    const postElement = document.createElement('div');
+    postElement.className = 'post-item mb-3';
+    postElement.setAttribute('data-post-id', post.id);
+    
+    // Convert Firestore timestamp
+    const timestamp = post.timestamp && post.timestamp.toDate ? post.timestamp.toDate() : new Date(post.timestamp);
+    const timeAgo = getTimeAgo(timestamp);
+    
+    // Check if current user is the author (for edit/delete menu)
+    const isAuthor = currentUser && (post.authorId === currentUser.uid);
+    
+    postElement.innerHTML = `
+        <div class="post-header">
+            <img src="${post.authorAvatar || user.avatar}" 
+                 alt="${post.authorName || user.fullName}" 
+                 class="post-avatar cursor-pointer" 
+                 onclick="showProfileByAuthor('${post.authorId}')">
+            <div class="post-author-info">
+                <div class="post-author cursor-pointer" onclick="showProfileByAuthor('${post.authorId}')">${post.authorName || user.fullName}</div>
+                <div class="post-time">${timeAgo}</div>
+            </div>
+            ${isAuthor ? `
+                <div class="dropdown">
+                    <button class="post-menu-btn" onclick="togglePostMenu('${post.id}')" id="postMenuBtn_${post.id}">
+                        <i class="bi bi-three-dots"></i>
+                    </button>
+                    <div class="post-menu" id="postMenu_${post.id}">
+                        <button class="post-menu-item" onclick="editPost('${post.id}')">
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <button class="post-menu-item text-danger" onclick="confirmDeletePost('${post.id}')">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+        <div class="post-content">${post.content}</div>
+        ${post.media ? createMediaElement(post.media) : ''}
+        <div class="post-actions">
+            <button class="post-action ${post.likes && post.likes.includes(currentUser?.uid) ? 'liked' : ''}" onclick="toggleLike('${post.id}')">
+                <i class="bi bi-heart${post.likes && post.likes.includes(currentUser?.uid) ? '-fill' : ''}"></i> ${post.likes ? post.likes.length : 0}
+            </button>
+            <button class="post-action" onclick="toggleComments('${post.id}')">
+                <i class="bi bi-chat"></i> ${post.comments ? post.comments.length : 0}
+            </button>
+            <button class="post-action" onclick="sharePost('${post.id}')">
+                <i class="bi bi-share"></i> ${post.shares || 0}
+            </button>
+        </div>
+        <div id="comments_${post.id}" style="display: none;" class="mt-3 px-3 pb-3">
+            ${post.comments ? post.comments.map(comment => createCommentElement(comment)).join('') : ''}
+            <div class="d-flex mt-2">
+                <img src="${currentUser ? currentUser.avatar : ''}" class="rounded-circle me-2" style="width:30px;height:30px;object-fit:cover;">
+                <input type="text" class="form-control" placeholder="Write a comment..." onkeypress="handleCommentSubmit(event, '${post.id}')">
+            </div>
+        </div>
+    `;
+    
+    return postElement;
 }
 
 // --------------------------------------------------
@@ -1943,7 +2149,20 @@ function tfDebug() {
 }
 
 // Post Functions
-function publishPost() {
+// ===========================
+// ENHANCED POST CRUD SYSTEM WITH FIREBASE
+// ===========================
+
+// Global variables for post management
+let currentEditingPostId = null;
+let currentDeletingPostId = null;
+let currentEditingPost = null;
+let editAttachedMedia = null;
+
+/**
+ * Enhanced publishPost function with Firebase integration
+ */
+async function publishPost() {
     if (!currentUser) {
         showSignInModal();
         return;
@@ -1952,117 +2171,1054 @@ function publishPost() {
     const content = document.getElementById('postContent').value.trim();
     
     if (!content && !attachedMedia) {
-        alert('Please write something or attach media to post.');
+        showNotification('Please write something or attach media to post.', 'warning');
         return;
     }
     
-    const newPost = {
-        id: posts.length + 1,
-        authorId: currentUser.id,
-        content: content || '',
-        timestamp: new Date(),
-        likes: [],
-        comments: [],
-        shares: 0,
-        media: attachedMedia
-    };
-    
-    posts.push(newPost);
-    // Persist immediately so a fast reload still finds the new post
-    saveDataToStorage();
-    
-    // Clear composer
-    document.getElementById('postContent').value = '';
-    attachedMedia = null;
-    updateAttachmentButtons();
-    
-    // Reload posts feed
-    loadPostsFeed();
-    // Debug: verify persistence immediately
     try {
-        const persisted = localStorage.getItem('truefew_posts');
-        if (persisted) {
-            const arr = JSON.parse(persisted);
-            tfDebug('Post persisted. Stored posts length:', arr.length, 'Latest post id:', newPost.id);
-        } else {
-            tfDebug('Post not found in localStorage right after save (unexpected)');
-        }
-    } catch (e) { tfDebug('Persistence verification failed:', e.message); }
-    
-    // Show success message
-    showToast('Post published successfully!', 'success');
-}
-
-function toggleLike(postId) {
-    if (!currentUser) {
-        showSignInModal();
-        return;
-    }
-    
-    const post = posts.find(p => p.id === postId);
-    if (!post) return;
-    
-    if (!currentUser || !currentUser.id) {
-        showSignInModal();
-        return;
-    }
-    
-    const userIdStr = currentUser.id.toString();
-    const likeIndex = post.likes.indexOf(userIdStr);
-    
-    if (likeIndex > -1) {
-        post.likes.splice(likeIndex, 1);
-    } else {
-        post.likes.push(userIdStr);
-    }
-    
-    saveDataToStorage();
-    loadPostsFeed();
-}
-
-function toggleComments(postId) {
-    const commentsDiv = document.getElementById(`comments_${postId}`);
-    commentsDiv.style.display = commentsDiv.style.display === 'none' ? 'block' : 'none';
-}
-
-function handleCommentSubmit(event, postId) {
-    if (event.key === 'Enter' && event.target.value.trim()) {
-        const post = posts.find(p => p.id === postId);
-        if (!post || !currentUser) return;
+        // Show loading state
+        const publishBtn = document.getElementById('publishPost');
+        const originalText = publishBtn.innerHTML;
+        publishBtn.innerHTML = '<span class="loading-spinner"></span> Publishing...';
+        publishBtn.disabled = true;
         
-        const comment = {
-            authorId: currentUser.id,
-            content: event.target.value.trim(),
-            timestamp: new Date()
+        // Create post object
+        const newPost = {
+            authorId: currentUser.uid,
+            authorName: currentUser.fullName,
+            authorAvatar: currentUser.avatar,
+            content: content || '',
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            likes: [],
+            comments: [],
+            shares: 0,
+            media: attachedMedia || null
         };
         
-        post.comments.push(comment);
-        saveDataToStorage();
+        // Save to Firestore
+        await db.collection('posts').add(newPost);
         
-        event.target.value = '';
-        loadPostsFeed();
+        // Clear composer
+        document.getElementById('postContent').value = '';
+        attachedMedia = null;
+        updateAttachmentButtons();
         
-        // Re-open comments section
-        setTimeout(() => {
-            document.getElementById(`comments_${postId}`).style.display = 'block';
-        }, 100);
+        // Reload posts feed
+        await loadPostsFeed();
+        
+        // Reset button
+        publishBtn.innerHTML = originalText;
+        publishBtn.disabled = false;
+        
+        showNotification('Post published successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Error publishing post:', error);
+        showNotification('Failed to publish post. Please try again.', 'danger');
+        
+        // Reset button
+        const publishBtn = document.getElementById('publishPost');
+        publishBtn.innerHTML = 'Post';
+        publishBtn.disabled = false;
     }
 }
 
-function sharePost(postId) {
+/**
+ * Enhanced loadPostsFeed function with Firebase integration
+ */
+async function loadPostsFeed() {
+    const postsFeed = document.getElementById('postsFeed');
+    if (!postsFeed) return;
+    
+    postsFeed.innerHTML = '<div class="text-center p-4"><span class="loading-spinner"></span> Loading posts...</div>';
+    
+    try {
+        // Get posts from Firestore (ordered by timestamp, newest first)
+        const snapshot = await db.collection('posts')
+            .orderBy('timestamp', 'desc')
+            .limit(50)
+            .get();
+        
+        if (snapshot.empty) {
+            postsFeed.innerHTML = `
+                <div class="text-center p-4 text-muted">
+                    <i class="bi bi-chat-square-text fs-1 d-block mb-3"></i>
+                    <h5>No posts yet</h5>
+                    <p>Be the first to share something!</p>
+                </div>
+            `;
+            return;
+        }
+        
+        postsFeed.innerHTML = '';
+        
+        snapshot.docs.forEach(doc => {
+            const post = { id: doc.id, ...doc.data() };
+            const postElement = createPostElement(post);
+            postsFeed.appendChild(postElement);
+        });
+        
+    } catch (error) {
+        console.error('Error loading posts:', error);
+        postsFeed.innerHTML = `
+            <div class="text-center p-4 text-danger">
+                <i class="bi bi-exclamation-triangle fs-1 d-block mb-3"></i>
+                <h5>Error loading posts</h5>
+                <p>Please refresh the page to try again.</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Create post element with 3-dot menu for CRUD operations
+ */
+function createPostElement(post) {
+    const postElement = document.createElement('div');
+    postElement.className = 'post-item fade-in';
+    postElement.setAttribute('data-post-id', post.id);
+    
+    // Convert Firestore timestamp
+    const timestamp = post.timestamp && post.timestamp.toDate ? post.timestamp.toDate() : new Date(post.timestamp);
+    const timeAgo = getTimeAgo(timestamp);
+    
+    // Check if current user liked the post
+    const isLiked = currentUser && post.likes && post.likes.includes(currentUser.uid);
+    const isAuthor = currentUser && post.authorId === currentUser.uid;
+    
+    postElement.innerHTML = `
+        <div class="post-header">
+            <img src="${post.authorAvatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(post.authorName || 'User')}" 
+                 alt="${post.authorName}" 
+                 class="post-avatar cursor-pointer" 
+                 onclick="showProfileByAuthor('${post.authorId}')">
+            <div class="post-author-info">
+                <div class="post-author cursor-pointer" onclick="showProfileByAuthor('${post.authorId}')">${post.authorName || 'Unknown User'}</div>
+                <div class="post-time">${timeAgo}</div>
+            </div>
+            ${isAuthor ? `
+                <div class="dropdown">
+                    <button class="post-menu-btn" onclick="togglePostMenu('${post.id}')" id="postMenuBtn_${post.id}">
+                        <i class="bi bi-three-dots"></i>
+                    </button>
+                    <div class="post-menu" id="postMenu_${post.id}">
+                        <button class="post-menu-item" onclick="editPost('${post.id}')">
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <button class="post-menu-item text-danger" onclick="confirmDeletePost('${post.id}')">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+        <div class="post-content">${post.content}</div>
+        ${post.media ? createMediaElement(post.media) : ''}
+        <div class="post-actions">
+            <button class="post-action ${isLiked ? 'liked' : ''}" onclick="toggleLike('${post.id}')">
+                <i class="bi bi-heart${isLiked ? '-fill' : ''}"></i> ${post.likes ? post.likes.length : 0}
+            </button>
+            <button class="post-action" onclick="toggleComments('${post.id}')">
+                <i class="bi bi-chat"></i> ${post.comments ? post.comments.length : 0}
+            </button>
+            <button class="post-action" onclick="sharePost('${post.id}')">
+                <i class="bi bi-share"></i> ${post.shares || 0}
+            </button>
+        </div>
+        <div id="comments_${post.id}" style="display: none;" class="mt-3 px-3 pb-3">
+            ${post.comments ? post.comments.map(comment => createCommentElement(comment)).join('') : ''}
+            <div class="d-flex mt-2">
+                <img src="${currentUser ? currentUser.avatar : ''}" class="rounded-circle me-2" style="width:30px;height:30px;object-fit:cover;">
+                <input type="text" class="form-control" placeholder="Write a comment..." onkeypress="handleCommentSubmit(event, '${post.id}')">
+            </div>
+        </div>
+    `;
+    
+    return postElement;
+}
+
+/**
+ * Create media element for posts
+ */
+function createMediaElement(media) {
+    if (!media) return '';
+    
+    switch (media.type) {
+        case 'image':
+            return `<div class="post-media px-3 pb-2">
+                <img src="${media.url}" alt="Post image" class="img-fluid rounded">
+            </div>`;
+        case 'video':
+            if (media.service === 'youtube') {
+                return `<div class="post-media px-3 pb-2">
+                    <div class="ratio ratio-16x9">
+                        <iframe src="${media.embedUrl}" 
+                                title="YouTube video player" 
+                                frameborder="0" 
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                allowfullscreen
+                                class="rounded">
+                        </iframe>
+                    </div>
+                </div>`;
+            }
+            break;
+        case 'music':
+            if (media.service === 'spotify') {
+                return `<div class="post-media px-3 pb-2">
+                    <iframe src="${media.embedUrl}" 
+                            width="100%" 
+                            height="152" 
+                            frameborder="0" 
+                            allowtransparency="true" 
+                            allow="encrypted-media"
+                            class="rounded">
+                    </iframe>
+                </div>`;
+            }
+            break;
+        default:
+            return `<div class="post-media px-3 pb-2">
+                <div class="p-3 bg-light rounded">
+                    <i class="bi bi-link me-2"></i>
+                    <a href="${media.url}" target="_blank">${media.title || 'Media Link'}</a>
+                </div>
+            </div>`;
+    }
+    return '';
+}
+
+/**
+ * Create comment element
+ */
+function createCommentElement(comment) {
+    const timestamp = comment.timestamp && comment.timestamp.toDate ? comment.timestamp.toDate() : new Date(comment.timestamp);
+    return `
+        <div class="d-flex mb-2">
+            <img src="${comment.authorAvatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(comment.authorName || 'User')}" 
+                 class="rounded-circle me-2" style="width:30px;height:30px;object-fit:cover;">
+            <div class="flex-grow-1">
+                <strong>${comment.authorName || 'Unknown User'}</strong>
+                <span class="text-muted ms-2">${getTimeAgo(timestamp)}</span>
+                <div>${comment.content}</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Toggle post menu visibility
+ */
+function togglePostMenu(postId) {
+    // Close all other open menus
+    document.querySelectorAll('.post-menu.show').forEach(menu => {
+        if (menu.id !== `postMenu_${postId}`) {
+            menu.classList.remove('show');
+        }
+    });
+    
+    // Toggle current menu
+    const menu = document.getElementById(`postMenu_${postId}`);
+    if (menu) {
+        menu.classList.toggle('show');
+    }
+}
+
+// Close post menus when clicking outside
+document.addEventListener('click', function(event) {
+    if (!event.target.closest('.post-menu-btn') && !event.target.closest('.post-menu')) {
+        document.querySelectorAll('.post-menu.show').forEach(menu => {
+            menu.classList.remove('show');
+        });
+    }
+});
+
+/**
+ * Enhanced toggleLike function with Firebase
+ */
+async function toggleLike(postId) {
     if (!currentUser) {
         showSignInModal();
         return;
     }
     
-    const post = posts.find(p => p.id === postId);
-    if (!post) return;
+    try {
+        const postRef = db.collection('posts').doc(postId);
+        const postDoc = await postRef.get();
+        
+        if (!postDoc.exists) {
+            showNotification('Post not found', 'error');
+            return;
+        }
+        
+        const post = postDoc.data();
+        const likes = post.likes || [];
+        const userIndex = likes.indexOf(currentUser.uid);
+        
+        if (userIndex > -1) {
+            // Remove like
+            likes.splice(userIndex, 1);
+        } else {
+            // Add like
+            likes.push(currentUser.uid);
+        }
+        
+        await postRef.update({ likes });
+        
+        // Update UI immediately
+        const likeBtn = document.querySelector(`[data-post-id="${postId}"] .post-action`);
+        if (likeBtn) {
+            const isLiked = likes.includes(currentUser.uid);
+            likeBtn.className = `post-action ${isLiked ? 'liked' : ''}`;
+            likeBtn.innerHTML = `<i class="bi bi-heart${isLiked ? '-fill' : ''}"></i> ${likes.length}`;
+        }
+        
+    } catch (error) {
+        console.error('Error toggling like:', error);
+        showNotification('Failed to update like. Please try again.', 'danger');
+    }
+}
+
+/**
+ * Enhanced toggleComments function  
+ */
+function toggleComments(postId) {
+    const commentsDiv = document.getElementById(`comments_${postId}`);
+    if (commentsDiv) {
+        commentsDiv.style.display = commentsDiv.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+/**
+ * Enhanced handleCommentSubmit function with Firebase
+ */
+async function handleCommentSubmit(event, postId) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        if (!currentUser) {
+            showSignInModal();
+            return;
+        }
+        
+        try {
+            const content = event.target.value.trim();
+            const comment = {
+                authorId: currentUser.uid,
+                authorName: currentUser.fullName,
+                authorAvatar: currentUser.avatar,
+                content: content,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            const postRef = db.collection('posts').doc(postId);
+            await postRef.update({
+                comments: firebase.firestore.FieldValue.arrayUnion(comment)
+            });
+            
+            event.target.value = '';
+            await loadPostsFeed();
+            
+            // Re-open comments section
+            setTimeout(() => {
+                const commentsDiv = document.getElementById(`comments_${postId}`);
+                if (commentsDiv) {
+                    commentsDiv.style.display = 'block';
+                }
+            }, 100);
+            
+        } catch (error) {
+            console.error('Error adding comment:', error);
+            showNotification('Failed to add comment. Please try again.', 'danger');
+        }
+    }
+}
+
+/**
+ * Enhanced sharePost function with Firebase
+ */
+async function sharePost(postId) {
+    if (!currentUser) {
+        showSignInModal();
+        return;
+    }
     
-    post.shares++;
-    saveDataToStorage();
-    loadPostsFeed();
+    try {
+        const postRef = db.collection('posts').doc(postId);
+        await postRef.update({
+            shares: firebase.firestore.FieldValue.increment(1)
+        });
+        
+        // Update UI immediately
+        const shareBtn = document.querySelector(`[data-post-id="${postId}"] .post-action:nth-child(3)`);
+        if (shareBtn) {
+            const currentShares = parseInt(shareBtn.textContent.split(' ')[1]) || 0;
+            shareBtn.innerHTML = `<i class="bi bi-share"></i> ${currentShares + 1}`;
+        }
+        
+        showNotification('Post shared!', 'success');
+        
+    } catch (error) {
+        console.error('Error sharing post:', error);
+        showNotification('Failed to share post. Please try again.', 'danger');
+    }
+}
+
+/**
+ * Show profile by author ID
+ */
+function showProfileByAuthor(authorId) {
+    // Use the main showProfile function with navigation state tracking
+    showProfile(authorId);
+}
+
+/**
+ * Edit post function
+ */
+async function editPost(postId) {
+    try {
+        const postRef = db.collection('posts').doc(postId);
+        const postDoc = await postRef.get();
+        
+        if (!postDoc.exists) {
+            showNotification('Post not found', 'error');
+            return;
+        }
+        
+        const post = postDoc.data();
+        
+        // Check if user is the author
+        if (post.authorId !== currentUser.uid) {
+            showNotification('You can only edit your own posts', 'warning');
+            return;
+        }
+        
+        // Set current editing post
+        currentEditingPostId = postId;
+        currentEditingPost = post;
+        editAttachedMedia = post.media ? { ...post.media } : null;
+        
+        // Populate edit modal
+        const editPostContent = document.getElementById('editPostContent');
+        const editPostCounter = document.getElementById('editPostCounter');
+        
+        editPostContent.value = post.content || '';
+        updateEditPostCounter();
+        
+        // Show current media if exists
+        const editCurrentMedia = document.getElementById('editCurrentMedia');
+        const editCurrentMediaPreview = document.getElementById('editCurrentMediaPreview');
+        
+        if (post.media) {
+            editCurrentMediaPreview.innerHTML = createMediaPreview(post.media);
+            editCurrentMedia.style.display = 'block';
+        } else {
+            editCurrentMedia.style.display = 'none';
+        }
+        
+        // Reset new media preview and buttons
+        document.getElementById('editNewMediaPreview').style.display = 'none';
+        updateEditAttachmentButtons();
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('editPostModal'));
+        modal.show();
+        
+        // Close post menu
+        document.querySelectorAll('.post-menu.show').forEach(menu => {
+            menu.classList.remove('show');
+        });
+        
+    } catch (error) {
+        console.error('Error loading post for edit:', error);
+        showNotification('Failed to load post for editing', 'danger');
+    }
+}
+
+/**
+ * Save edited post
+ */
+async function saveEditPost() {
+    if (!currentEditingPostId) return;
     
-    showToast('Post shared!', 'success');
+    const content = document.getElementById('editPostContent').value.trim();
+    
+    if (!content && !editAttachedMedia) {
+        showNotification('Post must have content or media', 'warning');
+        return;
+    }
+    
+    try {
+        const saveBtn = document.getElementById('saveEditPostBtn');
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<span class="loading-spinner"></span> Saving...';
+        saveBtn.disabled = true;
+        
+        const updateData = {
+            content: content,
+            media: editAttachedMedia,
+            editedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection('posts').doc(currentEditingPostId).update(updateData);
+        
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('editPostModal')).hide();
+        
+        // Reload posts
+        await loadPostsFeed();
+        
+        showNotification('Post updated successfully!', 'success');
+        
+        // Reset editing state
+        currentEditingPostId = null;
+        currentEditingPost = null;
+        editAttachedMedia = null;
+        
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+        
+    } catch (error) {
+        console.error('Error updating post:', error);
+        showNotification('Failed to update post. Please try again.', 'danger');
+        
+        const saveBtn = document.getElementById('saveEditPostBtn');
+        saveBtn.innerHTML = '<i class="bi bi-check"></i> Save Changes';
+        saveBtn.disabled = false;
+    }
+}
+
+/**
+ * Update character counter for edit post
+ */
+function updateEditPostCounter() {
+    const editPostContent = document.getElementById('editPostContent');
+    const editPostCounter = document.getElementById('editPostCounter');
+    
+    if (editPostContent && editPostCounter) {
+        const length = editPostContent.value.length;
+        editPostCounter.textContent = `${length}/1000 characters`;
+        
+        if (length > 900) {
+            editPostCounter.className = 'character-counter danger';
+        } else if (length > 800) {
+            editPostCounter.className = 'character-counter warning';
+        } else {
+            editPostCounter.className = 'character-counter';
+        }
+    }
+}
+
+/**
+ * Confirm delete post
+ */
+function confirmDeletePost(postId) {
+    currentDeletingPostId = postId;
+    const modal = new bootstrap.Modal(document.getElementById('deletePostModal'));
+    modal.show();
+    
+    // Close post menu
+    document.querySelectorAll('.post-menu.show').forEach(menu => {
+        menu.classList.remove('show');
+    });
+}
+
+/**
+ * Execute post deletion
+ */
+async function executeDeletePost() {
+    if (!currentDeletingPostId) return;
+    
+    try {
+        const deleteBtn = document.getElementById('confirmDeletePostBtn');
+        const originalText = deleteBtn.innerHTML;
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span> Deleting...';
+        deleteBtn.disabled = true;
+        
+        await db.collection('posts').doc(currentDeletingPostId).delete();
+        
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('deletePostModal')).hide();
+        
+        // Reload posts
+        await loadPostsFeed();
+        
+        showNotification('Post deleted successfully!', 'success');
+        currentDeletingPostId = null;
+        
+        deleteBtn.innerHTML = originalText;
+        deleteBtn.disabled = false;
+        
+    } catch (error) {
+        console.error('Error deleting post:', error);
+        showNotification('Failed to delete post. Please try again.', 'danger');
+        
+        const deleteBtn = document.getElementById('confirmDeletePostBtn');
+        deleteBtn.innerHTML = '<i class="bi bi-trash"></i> Delete Post';
+        deleteBtn.disabled = false;
+    }
+}
+
+// ===========================
+// PROFILE DELETION SYSTEM
+// ===========================
+
+/**
+ * Confirm profile deletion
+ */
+function confirmDeleteProfile() {
+    const modal = new bootstrap.Modal(document.getElementById('deleteProfileModal'));
+    modal.show();
+    
+    // Set up confirmation text validation
+    const deleteConfirmText = document.getElementById('deleteConfirmText');
+    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+    
+    deleteConfirmText.addEventListener('input', function() {
+        confirmDeleteBtn.disabled = this.value.trim().toUpperCase() !== 'DELETE';
+    });
+}
+
+/**
+ * Execute profile deletion
+ */
+async function executeDeleteProfile() {
+    const confirmText = document.getElementById('deleteConfirmText').value.trim();
+    
+    if (confirmText.toUpperCase() !== 'DELETE') {
+        showNotification('Please type "DELETE" to confirm', 'warning');
+        return;
+    }
+    
+    if (!currentUser) {
+        showNotification('No user logged in', 'error');
+        return;
+    }
+    
+    try {
+        const deleteBtn = document.getElementById('confirmDeleteBtn');
+        const originalText = deleteBtn.innerHTML;
+        deleteBtn.innerHTML = '<span class="loading-spinner"></span> Deleting...';
+        deleteBtn.disabled = true;
+        
+        // Delete user's posts
+        const userPostsQuery = await db.collection('posts').where('authorId', '==', currentUser.uid).get();
+        const batch = db.batch();
+        
+        userPostsQuery.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        
+        // Delete user document
+        batch.delete(db.collection('users').doc(currentUser.uid));
+        
+        await batch.commit();
+        
+        // Delete Firebase auth account
+        await auth.currentUser.delete();
+        
+        // Clear local data
+        localStorage.clear();
+        currentUser = null;
+        
+        // Close modal and show landing page
+        bootstrap.Modal.getInstance(document.getElementById('deleteProfileModal')).hide();
+        bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
+        
+        showLanding();
+        showNotification('Profile deleted successfully. We\'re sorry to see you go!', 'success');
+        
+    } catch (error) {
+        console.error('Error deleting profile:', error);
+        
+        let errorMessage = 'Failed to delete profile. Please try again.';
+        if (error.code === 'auth/requires-recent-login') {
+            errorMessage = 'Please sign out and sign back in, then try deleting your profile again.';
+        }
+        
+        showNotification(errorMessage, 'danger');
+        
+        const deleteBtn = document.getElementById('confirmDeleteBtn');
+        deleteBtn.innerHTML = '<i class="bi bi-trash"></i> Delete My Profile';
+        deleteBtn.disabled = false;
+    }
+}
+
+// ===========================
+// EDIT POST MEDIA FUNCTIONS
+// ===========================
+
+/**
+ * Create media preview for display
+ */
+function createMediaPreview(media) {
+    if (!media) return '';
+    
+    switch (media.type) {
+        case 'image':
+            return `<img src="${media.url}" alt="Post image" class="img-fluid rounded" style="max-height: 200px;">`;
+        case 'video':
+            if (media.service === 'youtube') {
+                return `<div class="d-flex align-items-center">
+                    <i class="bi bi-youtube text-danger me-2"></i>
+                    <div>
+                        <strong>YouTube Video</strong><br>
+                        <small class="text-muted">${media.title || 'Video'}</small>
+                    </div>
+                </div>`;
+            }
+            break;
+        case 'music':
+            if (media.service === 'spotify') {
+                return `<div class="d-flex align-items-center">
+                    <i class="bi bi-spotify text-success me-2"></i>
+                    <div>
+                        <strong>Spotify Track</strong><br>
+                        <small class="text-muted">${media.title || 'Music'}</small>
+                    </div>
+                </div>`;
+            } else if (media.service === 'apple') {
+                return `<div class="d-flex align-items-center">
+                    <i class="bi bi-music-note text-primary me-2"></i>
+                    <div>
+                        <strong>Apple Music</strong><br>
+                        <small class="text-muted">${media.title || 'Music'}</small>
+                    </div>
+                </div>`;
+            }
+            break;
+        default:
+            return `<div class="d-flex align-items-center">
+                <i class="bi bi-link me-2"></i>
+                <div>
+                    <strong>Media Link</strong><br>
+                    <small class="text-muted">${media.title || media.url}</small>
+                </div>
+            </div>`;
+    }
+    return '';
+}
+
+/**
+ * Remove current media from edit post
+ */
+function removeEditMedia() {
+    editAttachedMedia = null;
+    document.getElementById('editCurrentMedia').style.display = 'none';
+    updateEditAttachmentButtons();
+}
+
+/**
+ * Update edit post attachment buttons
+ */
+function updateEditAttachmentButtons() {
+    const photoBtn = document.getElementById('editAttachPhotoBtn');
+    const videoBtn = document.getElementById('editAttachVideoBtn');
+    const musicBtn = document.getElementById('editAttachMusicBtn');
+    const clearBtn = document.getElementById('editClearAttachmentBtn');
+    
+    if (!photoBtn || !videoBtn || !musicBtn || !clearBtn) return;
+
+    // Reset all buttons to default state
+    photoBtn.classList.remove('btn-success');
+    photoBtn.classList.add('btn-outline-secondary');
+    videoBtn.classList.remove('btn-success');
+    videoBtn.classList.add('btn-outline-secondary');
+    musicBtn.classList.remove('btn-success');
+    musicBtn.classList.add('btn-outline-secondary');
+
+    // Update button text to default
+    photoBtn.innerHTML = '<i class="bi bi-image"></i> Photo';
+    videoBtn.innerHTML = '<i class="bi bi-play-circle"></i> Video';
+    musicBtn.innerHTML = '<i class="bi bi-music-note"></i> Music';
+
+    // Hide clear button by default
+    clearBtn.style.display = 'none';
+
+    // Highlight the appropriate button if media is attached
+    if (editAttachedMedia) {
+        clearBtn.style.display = 'inline-block';
+
+        if (editAttachedMedia.type === 'image') {
+            photoBtn.classList.remove('btn-outline-secondary');
+            photoBtn.classList.add('btn-success');
+            photoBtn.innerHTML = '<i class="bi bi-check-circle"></i> Photo Attached';
+        } else if (editAttachedMedia.type === 'video') {
+            videoBtn.classList.remove('btn-outline-secondary');
+            videoBtn.classList.add('btn-success');
+            videoBtn.innerHTML = '<i class="bi bi-check-circle"></i> Video Attached';
+        } else if (editAttachedMedia.type === 'music') {
+            musicBtn.classList.remove('btn-outline-secondary');
+            musicBtn.classList.add('btn-success');
+            musicBtn.innerHTML = '<i class="bi bi-check-circle"></i> Music Attached';
+        }
+    }
+}
+
+/**
+ * Attach photo to edit post
+ */
+function editAttachPhoto() {
+    document.getElementById('editPostPhoto').click();
+}
+
+/**
+ * Preview photo for edit post
+ */
+async function editPreviewPhoto() {
+    const fileInput = document.getElementById('editPostPhoto');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        console.log('No file selected');
+        return;
+    }
+    
+    console.log('Processing file:', file.name, 'Size:', file.size);
+    
+    try {
+        // Check file size (limit to 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+            showNotification('Image too large. Please select an image under 10MB.', 'danger');
+            return;
+        }
+        
+        // Check if it's an image file
+        if (!file.type.startsWith('image/')) {
+            showNotification('Please select a valid image file.', 'danger');
+            return;
+        }
+        
+        console.log('Calling showImageEditorForEdit...');
+        
+        // Show image editor modal for edit mode
+        showImageEditorForEdit(file);
+        
+    } catch (error) {
+        console.error('Error in editPreviewPhoto:', error);
+        showNotification('Failed to process image. Please try again.', 'danger');
+    }
+}
+
+/**
+ * Show image editor for editing posts
+ * @param {File} file - The image file to edit
+ */
+function showImageEditorForEdit(file) {
+    try {
+        console.log('showImageEditorForEdit called with file:', file.name);
+        
+        currentImageFile = file;
+        
+        // Check if modal exists
+        const modalElement = document.getElementById('imageEditorModal');
+        if (!modalElement) {
+            console.error('Image editor modal not found!');
+            showNotification('Image editor not available. Please try again.', 'danger');
+            return;
+        }
+        
+        const modal = new bootstrap.Modal(modalElement);
+        
+        // Initialize canvas first
+        imageEditorCanvas = document.getElementById('imageEditorCanvas');
+        if (!imageEditorCanvas) {
+            console.error('Image editor canvas not found!');
+            showNotification('Image editor not available. Please try again.', 'danger');
+            return;
+        }
+        
+        imageEditorCtx = imageEditorCanvas.getContext('2d');
+        
+        // Store that we're in edit mode
+        imageEditorCanvas.dataset.editMode = 'true';
+        
+        console.log('Loading image file...');
+        
+        // Load image
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            console.log('File read successfully, creating image...');
+            editorImage = new Image();
+            editorImage.onload = function() {
+                console.log('Image loaded, initializing editor...');
+                try {
+                    initializeImageEditor();
+                    modal.show();
+                    console.log('Image editor opened successfully');
+                } catch (initError) {
+                    console.error('Error initializing image editor:', initError);
+                    showNotification('Failed to initialize image editor. Please try again.', 'danger');
+                }
+            };
+            editorImage.onerror = function() {
+                console.error('Failed to load image');
+                showNotification('Failed to load image. Please try again.', 'danger');
+            };
+            editorImage.src = e.target.result;
+        };
+        reader.onerror = function() {
+            console.error('Failed to read file');
+            showNotification('Failed to read image file. Please try again.', 'danger');
+        };
+        reader.readAsDataURL(file);
+        
+    } catch (error) {
+        console.error('Error in showImageEditorForEdit:', error);
+        showNotification('Failed to open image editor. Please try again.', 'danger');
+    }
+}
+
+/**
+ * Attach video to edit post
+ */
+function editAttachVideo() {
+    const url = prompt('Enter YouTube video URL:');
+    if (!url) return;
+    
+    try {
+        const videoData = processVideoUrl(url);
+        if (videoData) {
+            editAttachedMedia = videoData;
+            
+            document.getElementById('editNewMediaPreview').innerHTML = `
+                <div class="p-3 bg-light rounded">
+                    <strong>New Video:</strong><br>
+                    <div class="d-flex align-items-center mt-2">
+                        <i class="bi bi-youtube text-danger me-2"></i>
+                        <span>${videoData.title || 'YouTube Video'}</span>
+                    </div>
+                </div>
+            `;
+            document.getElementById('editNewMediaPreview').style.display = 'block';
+            
+            updateEditAttachmentButtons();
+            showNotification('Video attached successfully!', 'success');
+        } else {
+            showNotification('Invalid video URL. Please enter a valid YouTube URL.', 'warning');
+        }
+    } catch (error) {
+        console.error('Error processing video URL:', error);
+        showNotification('Failed to process video URL.', 'danger');
+    }
+}
+
+/**
+ * Attach music to edit post
+ */
+function editAttachMusic() {
+    const url = prompt('Enter Spotify or Apple Music URL:');
+    if (!url) return;
+    
+    try {
+        const musicData = processMusicUrl(url);
+        if (musicData) {
+            editAttachedMedia = musicData;
+            
+            const serviceName = musicData.service === 'spotify' ? 'Spotify' : 'Apple Music';
+            const iconClass = musicData.service === 'spotify' ? 'bi-spotify text-success' : 'bi-music-note text-primary';
+            
+            document.getElementById('editNewMediaPreview').innerHTML = `
+                <div class="p-3 bg-light rounded">
+                    <strong>New Music:</strong><br>
+                    <div class="d-flex align-items-center mt-2">
+                        <i class="bi ${iconClass} me-2"></i>
+                        <span>${serviceName} - ${musicData.title || 'Music Track'}</span>
+                    </div>
+                </div>
+            `;
+            document.getElementById('editNewMediaPreview').style.display = 'block';
+            
+            updateEditAttachmentButtons();
+            showNotification('Music attached successfully!', 'success');
+        } else {
+            showNotification('Invalid music URL. Please enter a valid Spotify or Apple Music URL.', 'warning');
+        }
+    } catch (error) {
+        console.error('Error processing music URL:', error);
+        showNotification('Failed to process music URL.', 'danger');
+    }
+}
+
+/**
+ * Clear edit post attachment
+ */
+function editClearAttachment() {
+    editAttachedMedia = null;
+    document.getElementById('editNewMediaPreview').style.display = 'none';
+    document.getElementById('editPostPhoto').value = '';
+    updateEditAttachmentButtons();
+    showNotification('Attachment removed!', 'info');
+}
+
+// ===========================
+// URL PROCESSING FUNCTIONS
+// ===========================
+
+/**
+ * Process YouTube video URL
+ */
+function processVideoUrl(url) {
+    const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+    const match = url.match(youtubeRegex);
+    
+    if (match) {
+        const videoId = match[1];
+        return {
+            type: 'video',
+            service: 'youtube',
+            url: url,
+            embedUrl: `https://www.youtube.com/embed/${videoId}`,
+            title: 'YouTube Video'
+        };
+    }
+    
+    return null;
+}
+
+/**
+ * Process Spotify or Apple Music URL
+ */
+function processMusicUrl(url) {
+    // Spotify URL patterns
+    const spotifyRegex = /(?:spotify:track:|https?:\/\/open\.spotify\.com\/track\/)([a-zA-Z0-9]+)/;
+    const spotifyMatch = url.match(spotifyRegex);
+    
+    if (spotifyMatch) {
+        const trackId = spotifyMatch[1];
+        return {
+            type: 'music',
+            service: 'spotify',
+            url: url,
+            embedUrl: `https://open.spotify.com/embed/track/${trackId}`,
+            title: 'Spotify Track'
+        };
+    }
+    
+    // Apple Music URL patterns
+    const appleMusicRegex = /https?:\/\/music\.apple\.com\/([a-z]{2}\/)?album\/[^\/]+\/(\d+)/;
+    const appleMusicMatch = url.match(appleMusicRegex);
+    
+    if (appleMusicMatch) {
+        return {
+            type: 'music',
+            service: 'apple',
+            url: url,
+            embedUrl: url.replace('music.apple.com', 'embed.music.apple.com'),
+            title: 'Apple Music Track'
+        };
+    }
+    
+    return null;
+}
+
+// ===========================
+// ENHANCED PHOTO RESIZING
+// ===========================
+
+/**
+ * Resize and optimize images for consistent post display
+ */
+async function resizeImageForPost(file, maxWidth = 800, maxHeight = 600, quality = 0.85) {
+    return resizeImage(file, maxWidth, maxHeight, quality);
 }
 
 // Media Attachment Functions
@@ -2140,20 +3296,32 @@ function attachMusic() {
     modal.show();
 }
 
-function previewPhoto() {
+async function previewPhoto() {
     const file = document.getElementById('postPhoto').files[0];
     const preview = document.getElementById('photoPreview');
     const previewImage = document.getElementById('previewImage');
     
     if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            previewImage.src = e.target.result;
-            preview.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
+        try {
+            // Check file size (limit to 10MB)
+            if (file.size > 10 * 1024 * 1024) {
+                showNotification('Image too large. Please select an image under 10MB.', 'danger');
+                return;
+            }
+            
+            // Show image editor modal
+            showImageEditor(file);
+        } catch (error) {
+            console.error('Error processing image:', error);
+            showNotification('Failed to process image. Please try again.', 'danger');
+            preview.style.display = 'none';
+        }
     } else {
         preview.style.display = 'none';
+        if (attachedMedia && attachedMedia.type === 'image') {
+            attachedMedia = null;
+            updateAttachmentButtons();
+        }
     }
 }
 
@@ -2249,6 +3417,406 @@ async function attachPhotoToPost() {
             console.error('Image processing failed:', error);
             showNotification('Image processing failed. Please try a different image.', 'danger');
         }
+    }
+}
+
+/* ===========================
+   IMAGE EDITOR FUNCTIONALITY
+   =========================== */
+
+// Global variables for image editor
+let currentImageFile = null;
+let imageEditorCanvas = null;
+let imageEditorCtx = null;
+let editorImage = null;
+let imageScale = 1;
+let imageX = 0;
+let imageY = 0;
+let isDragging = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+let currentAspectRatio = 'free';
+let targetWidth = 800;
+let targetHeight = 600;
+
+/**
+ * Show the image editor modal with the selected file
+ * @param {File} file - The image file to edit
+ */
+function showImageEditor(file) {
+    currentImageFile = file;
+    const modal = new bootstrap.Modal(document.getElementById('imageEditorModal'));
+    
+    // Initialize canvas
+    imageEditorCanvas = document.getElementById('imageEditorCanvas');
+    imageEditorCtx = imageEditorCanvas.getContext('2d');
+    
+    // Load image
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        editorImage = new Image();
+        editorImage.onload = function() {
+            initializeImageEditor();
+            modal.show();
+        };
+        editorImage.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+/**
+ * Initialize the image editor with the loaded image
+ */
+function initializeImageEditor() {
+    const frame = document.getElementById('editorPreviewFrame');
+    const frameWidth = frame.clientWidth - 4; // Account for border
+    const frameHeight = frame.clientHeight - 4;
+    
+    // Set canvas size to frame size
+    imageEditorCanvas.width = frameWidth;
+    imageEditorCanvas.height = frameHeight;
+    
+    // Calculate fit-to-frame scale
+    const scaleX = frameWidth / editorImage.width;
+    const scaleY = frameHeight / editorImage.height;
+    const fitScale = Math.min(scaleX, scaleY, 1);
+    
+    // Start with a scale that allows zooming out (85% of fit scale)
+    imageScale = Math.max(fitScale * 0.85, 0.3);
+    
+    // Update zoom slider range to accommodate the image
+    const zoomSlider = document.getElementById('zoomSlider');
+    const minZoom = Math.min(0.2, fitScale * 0.5); // Allow zooming out to 20% or half the fit scale
+    const maxZoom = Math.max(3, fitScale * 2); // Allow zooming in to 300% or double the fit scale
+    
+    zoomSlider.min = minZoom;
+    zoomSlider.max = maxZoom;
+    zoomSlider.value = imageScale;
+    zoomSlider.step = 0.05; // Finer control
+    
+    // Center the image
+    centerImage();
+    
+    // Set up event listeners
+    setupImageEditorEvents();
+    
+    // Reset aspect ratio
+    setAspectRatio('free');
+    
+    // Draw initial image
+    drawImageOnCanvas();
+}
+
+/**
+ * Set up mouse and touch event listeners for image manipulation
+ */
+function setupImageEditorEvents() {
+    // Mouse events
+    imageEditorCanvas.addEventListener('mousedown', startDrag);
+    imageEditorCanvas.addEventListener('mousemove', drag);
+    imageEditorCanvas.addEventListener('mouseup', endDrag);
+    imageEditorCanvas.addEventListener('mouseleave', endDrag);
+    
+    // Touch events for mobile
+    imageEditorCanvas.addEventListener('touchstart', handleTouch);
+    imageEditorCanvas.addEventListener('touchmove', handleTouch);
+    imageEditorCanvas.addEventListener('touchend', endDrag);
+    
+    // Prevent context menu
+    imageEditorCanvas.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+/**
+ * Handle mouse/touch drag start
+ */
+function startDrag(e) {
+    isDragging = true;
+    const rect = imageEditorCanvas.getBoundingClientRect();
+    lastMouseX = (e.clientX || e.touches[0].clientX) - rect.left;
+    lastMouseY = (e.clientY || e.touches[0].clientY) - rect.top;
+    imageEditorCanvas.style.cursor = 'grabbing';
+}
+
+/**
+ * Handle mouse/touch drag
+ */
+function drag(e) {
+    if (!isDragging) return;
+    
+    e.preventDefault();
+    const rect = imageEditorCanvas.getBoundingClientRect();
+    const currentX = (e.clientX || e.touches[0].clientX) - rect.left;
+    const currentY = (e.clientY || e.touches[0].clientY) - rect.top;
+    
+    imageX += currentX - lastMouseX;
+    imageY += currentY - lastMouseY;
+    
+    lastMouseX = currentX;
+    lastMouseY = currentY;
+    
+    drawImageOnCanvas();
+}
+
+/**
+ * Handle touch events
+ */
+function handleTouch(e) {
+    e.preventDefault();
+    if (e.type === 'touchstart') {
+        startDrag(e);
+    } else if (e.type === 'touchmove') {
+        drag(e);
+    }
+}
+
+/**
+ * Handle drag end
+ */
+function endDrag() {
+    isDragging = false;
+    imageEditorCanvas.style.cursor = 'move';
+}
+
+/**
+ * Draw the image on the canvas with current transformations
+ */
+function drawImageOnCanvas() {
+    // Clear canvas
+    imageEditorCtx.clearRect(0, 0, imageEditorCanvas.width, imageEditorCanvas.height);
+    
+    // Calculate scaled dimensions
+    const scaledWidth = editorImage.width * imageScale;
+    const scaledHeight = editorImage.height * imageScale;
+    
+    // Draw image
+    imageEditorCtx.drawImage(
+        editorImage,
+        imageX,
+        imageY,
+        scaledWidth,
+        scaledHeight
+    );
+}
+
+/**
+ * Set zoom level
+ * @param {number} scale - New scale value
+ */
+function setZoom(scale) {
+    imageScale = parseFloat(scale);
+    drawImageOnCanvas();
+}
+
+/**
+ * Adjust zoom by a delta amount
+ * @param {number} delta - Amount to change zoom
+ */
+function adjustZoom(delta) {
+    const zoomSlider = document.getElementById('zoomSlider');
+    const minZoom = parseFloat(zoomSlider.min);
+    const maxZoom = parseFloat(zoomSlider.max);
+    
+    const newScale = Math.max(minZoom, Math.min(maxZoom, imageScale + delta));
+    imageScale = newScale;
+    zoomSlider.value = newScale;
+    drawImageOnCanvas();
+}
+
+/**
+ * Center the image in the canvas
+ */
+function centerImage() {
+    const scaledWidth = editorImage.width * imageScale;
+    const scaledHeight = editorImage.height * imageScale;
+    
+    imageX = (imageEditorCanvas.width - scaledWidth) / 2;
+    imageY = (imageEditorCanvas.height - scaledHeight) / 2;
+    
+    drawImageOnCanvas();
+}
+
+/**
+ * Reset image editor to initial state
+ */
+function resetImageEditor() {
+    const frame = document.getElementById('editorPreviewFrame');
+    const frameWidth = frame.clientWidth - 4;
+    const frameHeight = frame.clientHeight - 4;
+    
+    const scaleX = frameWidth / editorImage.width;
+    const scaleY = frameHeight / editorImage.height;
+    imageScale = Math.min(scaleX, scaleY, 1);
+    
+    document.getElementById('zoomSlider').value = imageScale;
+    centerImage();
+}
+
+/**
+ * Fit image to frame (reset to initial scale)
+ */
+function fitImageToFrame() {
+    console.log('Fitting image to frame');
+    if (!editorImage || !imageEditorCanvas) return;
+    
+    const canvas = imageEditorCanvas;
+    const frameWidth = canvas.width;
+    const frameHeight = canvas.height;
+    
+    // Calculate scale to fit image within frame
+    const scaleX = frameWidth / editorImage.width;
+    const scaleY = frameHeight / editorImage.height;
+    const fitScale = Math.min(scaleX, scaleY, 1);
+    
+    console.log('Calculated fit scale:', fitScale);
+    
+    // Set to fit scale and center
+    imageScale = fitScale;
+    imageX = (canvas.width - editorImage.width * imageScale) / 2;
+    imageY = (canvas.height - editorImage.height * imageScale) / 2;
+    
+    // Update zoom slider
+    const zoomSlider = document.getElementById('zoomSlider');
+    zoomSlider.value = imageScale;
+    
+    // Redraw canvas
+    drawImageOnCanvas();
+}
+
+/**
+ * Set aspect ratio for cropping
+ * @param {string} ratio - Aspect ratio ('free', '1:1', '4:3', '16:9')
+ */
+function setAspectRatio(ratio) {
+    currentAspectRatio = ratio;
+    
+    // Update button states
+    document.querySelectorAll('[id^="aspect"]').forEach(btn => {
+        btn.classList.remove('active', 'btn-primary');
+        btn.classList.add('btn-outline-secondary');
+    });
+    
+    let activeBtn;
+    switch (ratio) {
+        case '1:1':
+            activeBtn = document.getElementById('aspectSquare');
+            targetWidth = 600;
+            targetHeight = 600;
+            break;
+        case '4:3':
+            activeBtn = document.getElementById('aspect43');
+            targetWidth = 800;
+            targetHeight = 600;
+            break;
+        case '16:9':
+            activeBtn = document.getElementById('aspect169');
+            targetWidth = 800;
+            targetHeight = 450;
+            break;
+        default:
+            activeBtn = document.getElementById('aspectFree');
+            targetWidth = 800;
+            targetHeight = 600;
+    }
+    
+    if (activeBtn) {
+        activeBtn.classList.remove('btn-outline-secondary');
+        activeBtn.classList.add('btn-primary', 'active');
+    }
+}
+
+/**
+ * Apply the image edit and use the result
+ */
+async function applyImageEdit() {
+    try {
+        showNotification('Processing image...', 'info', 1500);
+        
+        // Create a new canvas for the final output
+        const outputCanvas = document.createElement('canvas');
+        const outputCtx = outputCanvas.getContext('2d');
+        
+        // Set output dimensions based on aspect ratio
+        outputCanvas.width = targetWidth;
+        outputCanvas.height = targetHeight;
+        
+        // Calculate the crop area from the current view
+        const scaledWidth = editorImage.width * imageScale;
+        const scaledHeight = editorImage.height * imageScale;
+        
+        // Calculate what portion of the original image to use
+        const cropX = Math.max(0, -imageX / imageScale);
+        const cropY = Math.max(0, -imageY / imageScale);
+        const cropWidth = Math.min(
+            editorImage.width - cropX,
+            imageEditorCanvas.width / imageScale
+        );
+        const cropHeight = Math.min(
+            editorImage.height - cropY,
+            imageEditorCanvas.height / imageScale
+        );
+        
+        // Draw the cropped and scaled image to output canvas
+        outputCtx.drawImage(
+            editorImage,
+            cropX, cropY, cropWidth, cropHeight,
+            0, 0, targetWidth, targetHeight
+        );
+        
+        // Convert to blob
+        outputCanvas.toBlob((blob) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const isEditMode = imageEditorCanvas.dataset.editMode === 'true';
+                
+                if (isEditMode) {
+                    // Handle edit post mode
+                    editAttachedMedia = {
+                        type: 'image',
+                        url: e.target.result,
+                        title: currentImageFile.name
+                    };
+                    
+                    // Show preview in edit modal
+                    document.getElementById('editNewMediaPreview').innerHTML = `
+                        <div class="p-3 bg-light rounded">
+                            <strong>New Image:</strong><br>
+                            <img src="${e.target.result}" alt="Preview" class="img-fluid rounded mt-2" style="max-height: 200px;">
+                        </div>
+                    `;
+                    document.getElementById('editNewMediaPreview').style.display = 'block';
+                    updateEditAttachmentButtons();
+                } else {
+                    // Handle new post mode
+                    const preview = document.getElementById('photoPreview');
+                    const previewImage = document.getElementById('previewImage');
+                    previewImage.src = e.target.result;
+                    preview.style.display = 'block';
+                    
+                    // Store the processed image
+                    attachedMedia = {
+                        type: 'image',
+                        url: e.target.result,
+                        title: currentImageFile.name
+                    };
+                    
+                    updateAttachmentButtons();
+                }
+                
+                showNotification('Image processed successfully!', 'success');
+                
+                // Close the image editor modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('imageEditorModal'));
+                modal.hide();
+                
+                // Clear edit mode flag
+                delete imageEditorCanvas.dataset.editMode;
+            };
+            reader.readAsDataURL(blob);
+        }, 'image/jpeg', 0.85);
+        
+    } catch (error) {
+        console.error('Error applying image edit:', error);
+        showNotification('Failed to process image. Please try again.', 'danger');
     }
 }
 
@@ -2701,16 +4269,34 @@ function sendMessage(contactId) {
 
 function updateSidebarContent(type, title, content) {
     const sidebarContent = document.getElementById('sidebarContent');
+    
+    // If the same modal is already open, close it
+    if (currentOpenModal === type) {
+        sidebarContent.innerHTML = '';
+        currentOpenModal = null;
+        return;
+    }
+    
+    // Set the current open modal
+    currentOpenModal = type;
+    
     sidebarContent.innerHTML = `
         <div class="card shadow-sm">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0">${title}</h6>
+                <button type="button" class="btn-close btn-close-white" aria-label="Close" onclick="closeSidebarModal()"></button>
             </div>
             <div class="card-body">
                 ${content}
             </div>
         </div>
     `;
+}
+
+function closeSidebarModal() {
+    const sidebarContent = document.getElementById('sidebarContent');
+    sidebarContent.innerHTML = '';
+    currentOpenModal = null;
 }
 
 function editProfile() {
@@ -2723,6 +4309,13 @@ function editProfile() {
     document.getElementById('editCity').value = currentUser.city;
     document.getElementById('editState').value = currentUser.state;
     document.getElementById('editCountry').value = currentUser.country;
+    
+    const aboutMeField = document.getElementById('editAboutMe');
+    aboutMeField.value = currentUser.aboutMe || '';
+    
+    // Set up character counter for About Me
+    updateAboutMeCounter();
+    aboutMeField.addEventListener('input', updateAboutMeCounter);
     
     // Reset password section
     document.getElementById('changePasswordCheck').checked = false;
@@ -2999,13 +4592,36 @@ function togglePasswordSection() {
     }
 }
 
+/**
+ * Update About Me character counter
+ */
+function updateAboutMeCounter() {
+    const aboutMeField = document.getElementById('editAboutMe');
+    const counter = document.getElementById('aboutMeCounter');
+    
+    if (aboutMeField && counter) {
+        const currentLength = aboutMeField.value.length;
+        counter.textContent = `${currentLength}/500`;
+        
+        // Change color based on character count
+        if (currentLength > 450) {
+            counter.className = 'text-warning';
+        } else if (currentLength === 500) {
+            counter.className = 'text-danger';
+        } else {
+            counter.className = 'text-muted';
+        }
+    }
+}
+
 function populateEditInterests() {
     const grid = document.getElementById('editInterestsGrid');
     grid.innerHTML = '';
+    grid.className = 'row g-2 interests-form-section';
     
     availableInterests.forEach((interest, index) => {
         const colDiv = document.createElement('div');
-        colDiv.className = 'col-md-3';
+        colDiv.className = 'col-md-6 col-lg-4';
         
         const isChecked = selectedInterests.includes(interest);
         
@@ -3055,6 +4671,7 @@ async function submitEditProfile() {
     const city = document.getElementById('editCity').value.trim();
     const state = document.getElementById('editState').value.trim();
     const country = document.getElementById('editCountry').value.trim();
+    const aboutMe = document.getElementById('editAboutMe').value.trim();
     const imageFile = document.getElementById('editProfileImage').files[0];
     
     const changePassword = document.getElementById('changePasswordCheck').checked;
@@ -3067,15 +4684,50 @@ async function submitEditProfile() {
         return;
     }
     
+    // Validate About Me character limit
+    if (aboutMe.length > 500) {
+        alert('About Me section must be 500 characters or less.');
+        return;
+    }
+    
     if (selectedInterests.length < 8) {
         document.getElementById('editInterestError').textContent = 'Please select at least 8 interests.';
         document.getElementById('editInterestError').style.display = 'block';
         return;
     }
     
+    // Debug: Log current user info and form values
+    console.log('Edit Profile Validation Debug:', {
+        currentUser: { id: currentUser.id, uid: currentUser.uid, username: currentUser.username, email: currentUser.email },
+        formValues: { username, email },
+        usersArrayLength: users.length
+    });
+    
     // Check if username or email is taken by another user
-    const existingUser = users.find(u => u.id !== currentUser.id && (u.username === username || u.email === email));
+    const normalizedUsername = username.toLowerCase();
+    const normalizedEmail = email.toLowerCase();
+    
+    // Check both uid and id fields to handle Firebase/local user mismatches
+    const existingUser = users.find(u => {
+        const isCurrentUser = (u.id === currentUser.id) || 
+                             (u.uid === currentUser.uid) || 
+                             (currentUser.uid && u.id === currentUser.uid) ||
+                             (currentUser.id && u.uid === currentUser.id);
+        
+        if (isCurrentUser) return false; // Skip current user
+        
+        const userUsername = (u.username || '').toLowerCase();
+        const userEmail = (u.email || '').toLowerCase();
+        
+        return (userUsername === normalizedUsername) || (userEmail === normalizedEmail);
+    });
+    
     if (existingUser) {
+        console.error('Profile edit validation failed:', { 
+            conflictUser: { id: existingUser.id, uid: existingUser.uid, username: existingUser.username, email: existingUser.email },
+            currentUser: { id: currentUser.id, uid: currentUser.uid, username: currentUser.username, email: currentUser.email },
+            formData: { username, email }
+        });
         alert('Username or email is already taken by another user.');
         return;
     }
@@ -3108,6 +4760,7 @@ async function submitEditProfile() {
     currentUser.city = city;
     currentUser.state = state;
     currentUser.country = country;
+    currentUser.aboutMe = aboutMe;
     currentUser.interests = [...selectedInterests];
     if (!currentUser.id && currentUser.uid) currentUser.id = currentUser.uid;
     
@@ -3151,6 +4804,7 @@ async function submitEditProfile() {
                                 city: currentUser.city,
                                 state: currentUser.state,
                                 country: currentUser.country,
+                                aboutMe: currentUser.aboutMe,
                                 interests: currentUser.interests,
                                 avatar: currentUser.avatar,
                                 updatedAt: new Date().toISOString()
@@ -3211,6 +4865,7 @@ async function submitEditProfile() {
                     city: currentUser.city,
                     state: currentUser.state,
                     country: currentUser.country,
+                    aboutMe: currentUser.aboutMe,
                     interests: currentUser.interests,
                     updatedAt: new Date().toISOString()
                 });
@@ -3273,8 +4928,14 @@ auth.onAuthStateChanged(async (user) => {
     tfDebug('Auth state changed:', user ? `User: ${user.email} (verified: ${user?.emailVerified})` : 'User signed out');
     
     if (user) {
-        if (user.emailVerified) {
-            // User is signed in and email is verified - load profile
+        const isDevelopmentMode = localStorage.getItem('truefew_dev_mode') === 'true';
+        
+        if (user.emailVerified || isDevelopmentMode) {
+            // User is signed in and email is verified (or dev mode active) - load profile
+            if (isDevelopmentMode && !user.emailVerified) {
+                console.warn('⚠️ DEVELOPMENT MODE: Auth state - email verification bypassed');
+            }
+            
             try {
                 const userDoc = await db.collection('users').doc(user.uid).get();
                 if (userDoc.exists) {
@@ -3288,12 +4949,26 @@ auth.onAuthStateChanged(async (user) => {
                     ensureCurrentUserInUsersArray();
                     updateNavbarForSignedInUser();
                     
-                    // Only redirect to dashboard if we're on landing page
-                    if (currentPage === 'landing') {
-                        showDashboard();
-                    }
+
                     
                     tfDebug('User profile loaded:', currentUser.fullName);
+                    
+                    // Always check for navigation state to restore after user loads
+                    console.log('🔄 Auth complete, checking navigation state...');
+                    const restored = restoreNavigationState();
+                    
+                    if (!restored) {
+                        // Only redirect to dashboard if no navigation state was restored
+                        console.log('🔄 No navigation state restored, showing dashboard');
+                        showDashboard();
+                    } else {
+                        console.log('🔄 Navigation state successfully restored');
+                    }
+                    
+                    // Mark initial page load as complete after authentication is done
+                    isInitialPageLoad = false;
+                    console.log('🔄 Initial page load complete, flag reset');
+                    
                     // Refresh feeds in case placeholder authors were used before auth resolved
                     try { if (typeof loadPostsFeed === 'function') loadPostsFeed(); } catch {}
                 } else {
@@ -3305,13 +4980,17 @@ auth.onAuthStateChanged(async (user) => {
                 await auth.signOut();
             }
         } else {
-            // User is signed in but email is NOT verified
+            // User is signed in but email is NOT verified (and not in dev mode)
             tfDebug('User email not verified, keeping signed out state');
             currentUser = null;
             updateNavbarForSignedOutUser();
             
-            // Make sure we're on landing page
-            if (currentPage !== 'landing') {
+            // Check if there's stored navigation state before redirecting to landing
+            const storedState = getNavigationState();
+            if (storedState.page && storedState.page !== 'landing') {
+                console.log('🔄 Preserving stored navigation state during auth:', storedState);
+                // Don't redirect to landing - keep stored state for later restoration
+            } else if (currentPage !== 'landing') {
                 showLanding();
             }
         }
@@ -3321,8 +5000,12 @@ auth.onAuthStateChanged(async (user) => {
         currentUser = null;
         updateNavbarForSignedOutUser();
         
-        // Only redirect to landing if we're not already there
-        if (currentPage !== 'landing') {
+        // Check if there's stored navigation state before redirecting to landing
+        const storedState = getNavigationState();
+        if (storedState.page && storedState.page !== 'landing') {
+            console.log('🔄 Preserving stored navigation state during signout:', storedState);
+            // Don't redirect to landing - keep stored state for later restoration
+        } else if (currentPage !== 'landing') {
             showLanding();
         }
     }

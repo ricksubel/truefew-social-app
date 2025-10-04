@@ -39,15 +39,45 @@ body {
     min-height: 100vh;
     margin: 0;
     padding: 0;
+    position: relative;
+}
+
+/**
+ * Background image overlay for all pages except landing
+ * Applied at 40% opacity to maintain readability
+ */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('Assets/background-image.jpeg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.4;
+    z-index: -1;
+    pointer-events: none;
 }
 
 /**
  * Landing page body styles
  * Prevents scrolling when on the hero/landing page
+ * Full opacity background image for immersive experience
  */
 body.landing-page {
     overflow: hidden;
     height: 100vh;
+}
+
+/**
+ * Landing page background override
+ * 100% opacity for the landing page background
+ */
+body.landing-page::before {
+    opacity: 1;
 }
 
 /**
@@ -420,7 +450,7 @@ body.landing-page {
 
 /* Dashboard Styles */
 #dashboardPage {
-    background: linear-gradient(135deg, #F5F0E8 0%, #EDE6D9 100%);
+    background: transparent; /* Allow body background image to show through */
     padding-top: 1rem;
 }
 
@@ -441,6 +471,24 @@ body.landing-page {
     border-bottom: 1px solid rgba(180, 149, 106, 0.1);
     background: linear-gradient(135deg, #D4A574, #B8956A) !important;
     color: white !important;
+}
+
+/**
+ * Sidebar Modal Close Button Styles
+ * Ensures proper visibility and hover effects for close buttons
+ */
+.card-header .btn-close {
+    background: transparent url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%232C4B63'%3e%3cpath d='m.235 1.285 1.06-1.06L8 6.94l6.705-6.715 1.06 1.06L9.06 8l6.705 6.715-1.06 1.06L8 9.06l-6.705 6.715-1.06-1.06L6.94 8 .235 1.285z'/%3e%3c/svg%3e") center/1em auto no-repeat !important;
+    filter: none !important;
+    opacity: 0.9;
+    width: 0.8em;
+    height: 0.8em;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.card-header .btn-close:hover {
+    opacity: 1;
+    transform: scale(1.1);
 }
 
 /* News Feed Styles */
@@ -609,13 +657,18 @@ body.landing-page {
     border-radius: 10px;
     overflow: hidden;
     width: 100%;
-    /* Allow content to expand as needed */
+    text-align: center;
+    background-color: #f8f9fa; /* Light background for proper image display */
 }
 
 .post-media img {
     width: 100%;
     height: auto;
+    max-height: 500px;
+    object-fit: contain; /* Resize while maintaining aspect ratio */
     display: block;
+    border-radius: 8px;
+    margin: 0 auto;
 }
 
 .post-actions {
@@ -662,15 +715,95 @@ body.landing-page {
 
 .interest-badge {
     display: inline-block;
-    background: linear-gradient(135deg, #D2691E, #B8860B);
+    background: linear-gradient(135deg, #5B9AA0, #4A8089);
     color: white;
-    padding: 0.4rem 0.8rem;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    margin: 0.25rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    margin: 0.2rem;
     font-weight: 500;
     font-family: 'Montserrat', sans-serif;
-    box-shadow: 0 2px 8px rgba(210, 105, 30, 0.3);
+    box-shadow: 0 2px 6px rgba(91, 154, 160, 0.3);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.interest-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(91, 154, 160, 0.4);
+}
+
+/**
+ * Enhanced Interests Display for Forms
+ * Cleaner, more organized checkbox layout
+ */
+.interests-form-section .form-check {
+    margin-bottom: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 8px;
+    transition: background-color 0.2s ease;
+}
+
+.interests-form-section .form-check:hover {
+    background-color: rgba(91, 154, 160, 0.1);
+}
+
+.interests-form-section .form-check-input:checked {
+    background-color: #5B9AA0;
+    border-color: #5B9AA0;
+}
+
+.interests-form-section .form-check-input:checked + .form-check-label {
+    color: #2C4B63;
+    font-weight: 600;
+}
+
+.interests-form-section .form-check-label {
+    font-size: 0.9rem;
+    color: #666;
+    transition: color 0.2s ease;
+    cursor: pointer;
+}
+
+/**
+ * Scrollable Interests Container
+ */
+.interests-scrollable-container {
+    background: rgba(248, 249, 250, 0.5);
+}
+
+.interests-scrollable-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.interests-scrollable-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.interests-scrollable-container::-webkit-scrollbar-thumb {
+    background: #5B9AA0;
+    border-radius: 4px;
+}
+
+.interests-scrollable-container::-webkit-scrollbar-thumb:hover {
+    background: #4A8089;
+}
+
+/**
+ * About Me Section Styling
+ */
+.about-me-section {
+    background: rgba(91, 154, 160, 0.1);
+    border-radius: 10px;
+    padding: 1rem;
+    margin: 1rem 0;
+}
+
+.about-me-text {
+    font-style: italic;
+    color: #555;
+    line-height: 1.5;
+    margin: 0;
 }
 
 /* Search Results */
@@ -1334,6 +1467,32 @@ h1, h2, h3, h4, h5, h6 {
     height: auto;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    max-height: 500px; /* Consistent maximum height */
+    object-fit: contain; /* Maintain aspect ratio, no cropping */
+    display: block;
+    margin: 0 auto; /* Center images */
+}
+
+/* Post media container enhancements */
+.post-media {
+    margin-bottom: 1rem;
+    border-radius: 10px;
+    overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    text-align: center; /* Center align media content */
+    background-color: #f8f9fa; /* Light background for letterboxing */
+}
+
+/* Preview images in modals */
+.preview-image {
+    max-width: 100%;
+    max-height: 300px;
+    height: auto;
+    border-radius: 8px;
+    object-fit: contain; /* Maintain aspect ratio in previews */
+    display: block;
+    margin: 0 auto;
 }
 
 /* Responsive design for embeds */
@@ -1382,4 +1541,394 @@ h1, h2, h3, h4, h5, h6 {
 #attachPhotoBtn {
     border-top-left-radius: 8px !important;
     border-bottom-left-radius: 8px !important;
+}
+
+/* ===========================
+    POST CRUD FUNCTIONALITY
+   =========================== */
+
+/* Post 3-dot menu styles */
+.post-header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 1rem 1rem 0.5rem 1rem;
+}
+
+.post-menu-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    color: #6c757d;
+    font-size: 1.2rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.post-menu-btn:hover {
+    background-color: #f8f9fa;
+    color: #495057;
+}
+
+.post-menu-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+/* Dropdown menu for post actions */
+.post-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    min-width: 120px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.2s ease;
+}
+
+.post-menu.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.post-menu-item {
+    display: block;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: none;
+    background: none;
+    text-align: left;
+    color: #495057;
+    text-decoration: none;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.post-menu-item:hover {
+    background-color: #f8f9fa;
+    color: #495057;
+}
+
+.post-menu-item.text-danger:hover {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.post-menu-item i {
+    width: 16px;
+    margin-right: 0.5rem;
+}
+
+/* Enhanced post item styles */
+.post-item {
+    background: white;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.2s ease;
+    border: 1px solid #e9ecef;
+    overflow: hidden;
+}
+
+.post-item:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* Post author info */
+.post-author-info {
+    flex-grow: 1;
+    margin-left: 1rem;
+}
+
+.post-author {
+    font-weight: 600;
+    color: #2C4B63;
+    margin-bottom: 0.25rem;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.post-author:hover {
+    color: #5B9AA0;
+}
+
+.post-time {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.post-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #e9ecef;
+    transition: border-color 0.2s ease;
+}
+
+.post-avatar:hover {
+    border-color: #5B9AA0;
+}
+
+/* Post content styling */
+.post-content {
+    padding: 0 1rem 1rem 1rem;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: #495057;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Post actions enhancement */
+.post-actions {
+    padding: 0.75rem 1rem 1rem 1rem;
+    border-top: 1px solid #f1f3f4;
+    display: flex;
+    gap: 1rem;
+}
+
+.post-action {
+    background: none;
+    border: none;
+    color: #6c757d;
+    font-size: 0.875rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.post-action:hover {
+    background-color: #f8f9fa;
+    color: #495057;
+}
+
+.post-action.liked {
+    color: #dc3545;
+}
+
+.post-action.liked:hover {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+/* Character counter styling */
+.character-counter {
+    font-size: 0.75rem;
+    color: #6c757d;
+    text-align: right;
+    margin-top: 0.25rem;
+}
+
+.character-counter.warning {
+    color: #fd7e14;
+}
+
+.character-counter.danger {
+    color: #dc3545;
+}
+
+/* Loading states */
+.post-loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 0.125rem solid #f3f3f3;
+    border-top: 0.125rem solid #2C4B63;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Modal enhancements for CRUD operations */
+.modal-content {
+    border: none;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+.modal-header.bg-danger {
+    border-bottom: none;
+}
+
+.modal-header.bg-warning {
+    border-bottom: none;
+    color: #000 !important;
+}
+
+/* Delete confirmation input styling */
+#deleteConfirmText {
+    border: 2px solid #dc3545;
+    border-radius: 6px;
+}
+
+#deleteConfirmText:focus {
+    border-color: #dc3545;
+    box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+}
+
+/* Responsive adjustments for post menus */
+@media (max-width: 768px) {
+    .post-menu {
+        right: 1rem;
+        left: auto;
+        min-width: 140px;
+    }
+    
+    .post-header {
+        padding: 0.75rem 0.75rem 0.5rem 0.75rem;
+    }
+    
+    .post-menu-btn {
+        top: 0.75rem;
+        right: 0.75rem;
+    }
+    
+    .post-content {
+        padding: 0 0.75rem 0.75rem 0.75rem;
+    }
+    
+    .post-actions {
+        padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+    }
+}
+
+/* ===========================
+   IMAGE EDITOR STYLES
+   =========================== */
+
+/**
+ * Image Editor Modal Styles
+ * Interactive image cropping and positioning interface
+ */
+.image-editor-container {
+    max-width: 100%;
+    margin: 0 auto;
+}
+
+.editor-preview-frame {
+    width: 100%;
+    max-width: 600px;
+    height: 400px;
+    margin: 0 auto;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#imageEditorCanvas {
+    max-width: 100%;
+    max-height: 100%;
+    cursor: move;
+    display: block;
+    border-radius: 4px;
+}
+
+.editor-controls {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.editor-controls .form-label {
+    font-weight: 600;
+    color: #2C4B63;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.editor-controls .btn-group {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.editor-controls .btn-sm {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.form-range {
+    flex: 1;
+    margin: 0 0.5rem;
+}
+
+.aspect-ratio-controls .btn-group .btn {
+    flex: 1;
+}
+
+.aspect-ratio-controls .btn.active {
+    background-color: #5B9AA0;
+    border-color: #5B9AA0;
+    color: white;
+}
+
+/* Responsive image editor */
+@media (max-width: 768px) {
+    .editor-preview-frame {
+        height: 300px;
+    }
+    
+    .editor-controls .row {
+        margin-bottom: 1rem;
+    }
+    
+    .editor-controls .col-md-6 {
+        margin-bottom: 1rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .editor-preview-frame {
+        height: 250px;
+    }
+    
+    .editor-controls .btn-group {
+        flex-direction: column;
+    }
+    
+    .zoom-controls {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .zoom-controls .form-range {
+        margin: 0;
+        width: 100%;
+    }
 }
