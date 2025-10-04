@@ -50,10 +50,51 @@ if (!window.__tfErrorDiagnosticsAdded) {
 }
 
 /* ===========================
+   EARLY GA NETWORK ERROR SUPPRESSION
+   (Prevents initial "Fetch failed loading" noise from google-analytics g/collect before
+   initializeAnalytics() applies its later patch. Idempotent + safe.)
+   =========================== */
+(function earlySuppressGA(){
+    if (window.__tfEarlyGASuppression) return;
+    window.__tfEarlyGASuppression = true;
+    try {
+        if (window.fetch) {
+            const origFetch = window.fetch;
+            window.fetch = function(...args) {
+                let url = '';
+                try { url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || ''; } catch {}
+                if (url.includes('google-analytics.com/g/collect')) {
+                    // Short-circuit GA request completely to avoid network layer errors (esp. with blockers)
+                    return Promise.resolve(new Response(null, { status: 204, statusText: 'GA Suppressed (early short-circuit)' }));
+                }
+                return origFetch.apply(this, args);
+            };
+        }
+        if (navigator && navigator.sendBeacon) {
+            const origBeacon = navigator.sendBeacon;
+            navigator.sendBeacon = function(url, data) {
+                try {
+                    if (url && url.includes('google-analytics.com/g/collect')) {
+                        // Pretend success without invoking original beacon
+                        return true;
+                    }
+                    return origBeacon.call(this, url, data);    
+                } catch (e) {
+                    return true; // swallow
+                }
+            };
+        }
+        console.log('🛡️ Early GA suppression active');
+    } catch (e) {
+        console.log('Early GA suppression setup failed (ignored):', e.message || e);
+    }
+})();
+
+/* ===========================
    GLOBAL VARIABLES
    =========================== */
 // Application build/version tag (manually bumped when deploying breaking UI changes)
-window.TRUEFEW_VERSION = '1.4.1';
+window.TRUEFEW_VERSION = '1.4.5';
 
 // Current authenticated user object
 let currentUser = null;
@@ -66,6 +107,10 @@ let posts = [];
 
 // Messages organized by conversation ID (format: "userId1_userId2")
 let messages = {};
+
+// Per-user news interest subscriptions (was previously referenced before being declared)
+// Structure: { [userId: string]: string[] } where array contains interest/category names
+// Missing declaration caused ReferenceError inside saveDataToStorage(), aborting post persistence.
 
 // Current page state for navigation tracking
 let currentPage = 'landing';
@@ -172,11 +217,231 @@ document.addEventListener('DOMContentLoaded', function() {
         setupEventListeners();
         populateInterests();
         console.log('TrueFew Social App: Initialization complete');
+    
+    // Wait for Firebase to be ready
+    if (typeof firebase === 'undefined') {
+        console.error('Firebase not loaded! Check your internet connection and Firebase configuration.');
+        return;
+    }
+    
+    // Verify Firebase services are available
+    if (!auth || !db) {
+        console.error('Firebase services not initialized! Check firebase-config.js');
+        return;
+    }
+    
+    console.log('✅ Firebase services ready');
+    initializeAnalytics();
+    console.log('✅ TrueFew Social App Ready!');
     } catch (error) {
         console.error('TrueFew Social App: Initialization failed:', error);
         showNotification('Application failed to load. Please refresh the page.', 'danger');
     }
 });
+
+/**
+ * Update navbar for signed-in users
+ */
+function updateNavbarForSignedInUser() {
+    const openSignInBtn = document.getElementById('openSignInBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const openProfileBtn = document.getElementById('openProfileBtn');
+    
+    if (openSignInBtn) openSignInBtn.style.display = 'none';
+    if (signOutBtn) signOutBtn.style.display = 'block';
+    if (openProfileBtn) openProfileBtn.style.display = 'block';
+}
+
+/**
+ * Update navbar for signed-out users  
+ */
+function updateNavbarForSignedOutUser() {
+    const openSignInBtn = document.getElementById('openSignInBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const openProfileBtn = document.getElementById('openProfileBtn');
+    
+    if (openSignInBtn) openSignInBtn.style.display = 'block';
+    if (signOutBtn) signOutBtn.style.display = 'none';
+    if (openProfileBtn) openProfileBtn.style.display = 'none';
+}
+
+/**
+ * Hide all page containers
+ */
+function hideAllPages() {
+    const pages = ['landingPage', 'dashboardPage', 'profilePage', 'searchPage'];
+    pages.forEach(pageId => {
+        const page = document.getElementById(pageId);
+        if (page) page.style.display = 'none';
+    });
+}
+
+/**
+ * Show the landing page
+ */
+function showLanding() {
+    hideAllPages();
+    const landingPage = document.getElementById('landingPage');
+    if (landingPage) {
+        landingPage.style.display = 'block';
+        currentPage = 'landing';
+    }
+}
+
+/**
+ * Set up event listeners for the application
+ */
+function setupEventListeners() {
+    try {
+        // Navigation buttons
+        const openSearchBtn = document.getElementById('openSearchBtn');
+        const openProfileBtn = document.getElementById('openProfileBtn');
+        const openSignInBtn = document.getElementById('openSignInBtn');
+        const signOutBtn = document.getElementById('signOutBtn');
+        const heroCTA = document.getElementById('heroCTA');
+        
+        if (openSearchBtn) openSearchBtn.addEventListener('click', () => showSearchModal());
+        if (openProfileBtn) openProfileBtn.addEventListener('click', () => showProfile('current'));
+        if (openSignInBtn) openSignInBtn.addEventListener('click', () => showSignInModal());
+        if (signOutBtn) signOutBtn.addEventListener('click', () => signOut());
+        if (heroCTA) heroCTA.addEventListener('click', () => showSignUpModal());
+        
+        console.log('Event listeners setup complete');
+    } catch (error) {
+        console.warn('Some event listeners failed to setup:', error);
+    }
+}
+
+/**
+ * Populate interests in sign-up modal
+ */
+function populateInterests() {
+    const grid = document.getElementById('interestsGrid');
+    if (!grid) return;
+    
+    grid.innerHTML = '';
+    availableInterests.forEach((interest, index) => {
+        const colDiv = document.createElement('div');
+        colDiv.className = 'col-md-3';
+        colDiv.innerHTML = `
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="interest_${index}" value="${interest}" 
+                       onchange="toggleInterest('${interest}')">
+                <label class="form-check-label" for="interest_${index}">
+                    ${interest}
+                </label>
+            </div>
+        `;
+        grid.appendChild(colDiv);
+    });
+}
+
+/**
+ * Toggle interest selection
+ */
+function toggleInterest(interest) {
+    const index = selectedInterests.indexOf(interest);
+    if (index > -1) {
+        selectedInterests.splice(index, 1);
+    } else {
+        selectedInterests.push(interest);
+    }
+    
+    // Update UI feedback
+    const errorDiv = document.getElementById('interestError');
+    const successDiv = document.getElementById('interestSuccess');
+    
+    if (selectedInterests.length < 8) {
+        if (errorDiv) {
+            errorDiv.textContent = `Please select ${8 - selectedInterests.length} more interest(s).`;
+            errorDiv.style.display = 'block';
+        }
+        if (successDiv) successDiv.style.display = 'none';
+    } else {
+        if (errorDiv) errorDiv.style.display = 'none';
+        if (successDiv) {
+            successDiv.textContent = 'Great! Your interests help us connect you with like-minded people.';
+            successDiv.style.display = 'block';
+        }
+    }
+}
+
+/**
+ * Show sign-in modal
+ */
+function showSignInModal() {
+    const modal = new bootstrap.Modal(document.getElementById('signInModal'));
+    modal.show();
+}
+
+/**
+ * Show sign-up modal
+ */
+function showSignUpModal() {
+    const modal = new bootstrap.Modal(document.getElementById('signUpModal'));
+    modal.show();
+}
+
+/**
+ * Show search modal
+ */
+function showSearchModal() {
+    const modal = new bootstrap.Modal(document.getElementById('searchModal'));
+    modal.show();
+}
+
+/**
+ * Sign out user
+ */
+async function signOut() {
+    try {
+        await auth.signOut();
+        currentUser = null;
+        localStorage.removeItem('truefew_current_user');
+        updateNavbarForSignedOutUser();
+        showLanding();
+        showNotification('Signed out successfully', 'info');
+    } catch (error) {
+        console.error('Sign out error:', error);
+        showNotification('Error signing out', 'danger');
+    }
+}
+
+/**
+ * Validate password requirements
+ */
+function validatePassword(password) {
+    const minLength = 8;
+    const hasUppercase = /[A-Z]/.test(password);
+    const hasLowercase = /[a-z]/.test(password);
+    const hasNumber = /\d/.test(password);
+    
+    return password.length >= minLength && hasUppercase && hasLowercase && hasNumber;
+}
+
+/**
+ * Update dashboard content for signed-in user
+ */
+function updateDashboardContent() {
+    if (!currentUser) return;
+    
+    // Update user info in sidebar
+    const sidebarAvatar = document.getElementById('sidebarAvatar');
+    const sidebarUsername = document.getElementById('sidebarUsername');
+    const sidebarFullName = document.getElementById('sidebarFullName');
+    
+    if (sidebarAvatar && currentUser.avatar) {
+        sidebarAvatar.src = currentUser.avatar;
+    }
+    if (sidebarUsername) {
+        sidebarUsername.textContent = `@${currentUser.username}`;
+    }
+    if (sidebarFullName) {
+        sidebarFullName.textContent = currentUser.fullName;
+    }
+    
+    updateDashboardCounts();
+}
 
 /**
  * Initialize the application core functionality
@@ -194,6 +459,25 @@ function initializeApp() {
         if (savedUsers) {
             users = JSON.parse(savedUsers);
             console.log(`Loaded ${users.length} users from storage`);
+        }
+
+        // Load saved posts before possibly seeding sample data
+        const savedPosts = localStorage.getItem('truefew_posts');
+        if (savedPosts) {
+            try {
+                const parsedPosts = JSON.parse(savedPosts);
+                if (Array.isArray(parsedPosts) && parsedPosts.length) {
+                    posts = parsedPosts.map(p => ({
+                        ...p,
+                        // Normalize timestamp back to Date objects if serialized strings
+                        timestamp: p.timestamp ? new Date(p.timestamp) : new Date()
+                    }));
+                    console.log(`Loaded ${posts.length} posts from storage`);
+                }
+            } catch (e) {
+                console.warn('Failed to parse saved posts, clearing corrupt key.', e);
+                localStorage.removeItem('truefew_posts');
+            }
         }
         
         // Load saved messages with error handling
@@ -214,6 +498,10 @@ function initializeApp() {
         const savedCurrentUser = localStorage.getItem('truefew_current_user');
         if (savedCurrentUser) {
             currentUser = JSON.parse(savedCurrentUser);
+            // Normalize id for legacy local logic (ensure id exists)
+            if (!currentUser.id && currentUser.uid) {
+                currentUser.id = currentUser.uid;
+            }
             console.log(`Auto-login successful for user: ${currentUser.username}`);
             updateNavbarForSignedInUser();
             showDashboard();
@@ -331,7 +619,32 @@ function loadSampleData() {
             }
         ];
         
-        saveDataToStorage();
+        // Only persist sample data if there were no existing posts (avoid overwriting user-created content)
+        if (!localStorage.getItem('truefew_posts')) {
+            saveDataToStorage();
+        }
+    }
+}
+
+// Ensure there is at least a minimal set of demo posts if posts array is empty
+function ensureDemoPosts() {
+    try {
+        if (posts.length === 0 && users.length > 0) {
+            const baseAuthor = users[0];
+            posts.push({
+                id: 1,
+                authorId: baseAuthor.id,
+                content: 'Welcome to TrueFew! This is a starter post to get your feed going.',
+                timestamp: new Date(),
+                likes: [],
+                comments: [],
+                shares: 0,
+                media: null
+            });
+            saveDataToStorage();
+        }
+    } catch (e) {
+        console.warn('ensureDemoPosts failed:', e);
     }
 }
 
@@ -443,6 +756,8 @@ function showDashboard() {
         // Load dashboard content
         try {
             updateDashboardContent();
+            // Provide fallback demo posts if none loaded (e.g., sample data skipped)
+            ensureDemoPosts();
             loadNewsFeed();
             loadPostsFeed();
         } catch (error) {
@@ -648,15 +963,29 @@ async function submitSignUp() {
         const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         const user = userCredential.user;
 
-        // Prepare avatar (convert to base64 so it persists across contexts)
+        // Prepare avatar (always store a stable data URL or generated placeholder; never a blob: URL)
         let avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&size=150&background=667eea&color=fff`;
         if (imageFile) {
             avatarUrl = await new Promise((resolve, reject) => {
                 const r = new FileReader();
-                r.onload = e => resolve(e.target.result);
+                r.onload = e => {
+                    const result = e.target.result;
+                    // Ensure result is a data URL (starts with data:). If not, fall back to placeholder
+                    if (typeof result === 'string' && result.startsWith('data:')) {
+                        resolve(result);
+                    } else {
+                        console.warn('Avatar file did not produce data URL, using fallback.');
+                        resolve(avatarUrl);
+                    }
+                };
                 r.onerror = err => reject(err);
                 r.readAsDataURL(imageFile);
             });
+        }
+        // Final guard against accidental blob: or empty string
+        if (!avatarUrl || avatarUrl.startsWith('blob:')) {
+            console.warn('Replacing invalid avatar URL (blob/empty) with generated placeholder');
+            avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&size=150&background=667eea&color=fff`;
         }
 
         // Send email verification (with action code settings for better UX if desired)
@@ -1201,6 +1530,16 @@ function loadNewsFeed() {
 function loadPostsFeed() {
     const postsFeed = document.getElementById('postsFeed');
     postsFeed.innerHTML = '';
+    // Ensure we have the most recent persisted posts (covers reloads/races)
+    try {
+        const savedPosts = localStorage.getItem('truefew_posts');
+        if (savedPosts) {
+            const parsed = JSON.parse(savedPosts);
+            if (Array.isArray(parsed) && parsed.length >= posts.length) {
+                posts = parsed;
+            }
+        }
+    } catch {}
     
     if (posts.length === 0) {
         postsFeed.innerHTML = `
@@ -1217,14 +1556,26 @@ function loadPostsFeed() {
     const sortedPosts = posts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     
     sortedPosts.forEach(post => {
-        const author = users.find(u => u.id == post.authorId);
-        if (!author) return;
+        let author = users.find(u => u.id == post.authorId);
+        // Fallback to current user if matches
+        if (!author && currentUser && (post.authorId == currentUser.id)) {
+            author = currentUser;
+        }
+        // If still no author (auth async race), create a lightweight placeholder so the
+        // post is visible immediately; it will be updated on next feed refresh.
+        if (!author) {
+            author = {
+                id: post.authorId,
+                fullName: 'Loading user…',
+                avatar: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+            };
+        }
         
         const postElement = document.createElement('div');
         postElement.className = 'post-item fade-in';
         
         const timeAgo = getTimeAgo(post.timestamp);
-        const isLiked = currentUser && post.likes.includes(currentUser.id.toString());
+        const isLiked = currentUser && currentUser.id && post.likes.includes(currentUser.id.toString());
         
         postElement.innerHTML = `
             <div class="post-header">
@@ -1521,6 +1872,18 @@ function populateProfilePage(user) {
     }
 }
 
+// --------------------------------------------------
+// Lightweight Debug Utility (toggle in console via window.TRUEFEW_DEBUG=true)
+// --------------------------------------------------
+if (typeof window !== 'undefined' && typeof window.TRUEFEW_DEBUG === 'undefined') {
+    window.TRUEFEW_DEBUG = false; // set true in DevTools to enable verbose logs
+}
+function tfDebug() {
+    if (typeof window !== 'undefined' && window.TRUEFEW_DEBUG) {
+        try { console.log.apply(console, ['[TF]', ...arguments]); } catch(_) {}
+    }
+}
+
 // Post Functions
 function publishPost() {
     if (!currentUser) {
@@ -1547,6 +1910,7 @@ function publishPost() {
     };
     
     posts.push(newPost);
+    // Persist immediately so a fast reload still finds the new post
     saveDataToStorage();
     
     // Clear composer
@@ -1556,6 +1920,16 @@ function publishPost() {
     
     // Reload posts feed
     loadPostsFeed();
+    // Debug: verify persistence immediately
+    try {
+        const persisted = localStorage.getItem('truefew_posts');
+        if (persisted) {
+            const arr = JSON.parse(persisted);
+            tfDebug('Post persisted. Stored posts length:', arr.length, 'Latest post id:', newPost.id);
+        } else {
+            tfDebug('Post not found in localStorage right after save (unexpected)');
+        }
+    } catch (e) { tfDebug('Persistence verification failed:', e.message); }
     
     // Show success message
     showToast('Post published successfully!', 'success');
@@ -1569,6 +1943,11 @@ function toggleLike(postId) {
     
     const post = posts.find(p => p.id === postId);
     if (!post) return;
+    
+    if (!currentUser || !currentUser.id) {
+        showSignInModal();
+        return;
+    }
     
     const userIdStr = currentUser.id.toString();
     const likeIndex = post.likes.indexOf(userIdStr);
@@ -1723,7 +2102,7 @@ function previewPhoto() {
 function previewProfileImage() {
     const file = document.getElementById('signUpImage').files[0];
     // In a real app, you would handle the file upload here
-    console.log('Profile image selected:', file?.name);
+    tfDebug('Profile image selected:', file?.name);
 }
 
 function attachPhotoToPost() {
@@ -2248,33 +2627,31 @@ function getTimeAgo(timestamp) {
     return time.toLocaleDateString();
 }
 
+// Deprecated: showToast now delegates to showNotification for unified styling
 function showToast(message, type = 'info') {
-    // Create toast element
-    const toast = document.createElement('div');
-    toast.className = `alert alert-${type === 'success' ? 'success' : 'info'} alert-dismissible fade show position-fixed`;
-    toast.style.cssText = 'top: 100px; right: 20px; z-index: 9999; min-width: 300px;';
-    toast.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    
-    document.body.appendChild(toast);
-    
-    // Auto-remove after 3 seconds
-    setTimeout(() => {
-        if (toast.parentNode) {
-            toast.remove();
-        }
-    }, 3000);
+    // For backward compatibility, map success/info/danger through to showNotification
+    showNotification(message, type === 'success' ? 'success' : type, 3000);
 }
 
 function saveDataToStorage() {
-    localStorage.setItem('truefew_users', JSON.stringify(users));
-    localStorage.setItem('truefew_posts', JSON.stringify(posts));
-    localStorage.setItem('truefew_messages', JSON.stringify(messages));
-    localStorage.setItem('truefew_news_subscriptions', JSON.stringify(userNewsSubscriptions));
-    if (currentUser) {
-        localStorage.setItem('truefew_current_user', JSON.stringify(currentUser));
+    try {
+        // Defensive: ensure critical collections exist to avoid aborting the whole save operation
+        if (!Array.isArray(users)) users = [];
+        if (!Array.isArray(posts)) posts = [];
+        if (typeof messages !== 'object' || messages === null) messages = {};
+        if (typeof userNewsSubscriptions !== 'object' || userNewsSubscriptions === null) userNewsSubscriptions = {};
+
+        localStorage.setItem('truefew_users', JSON.stringify(users));
+        localStorage.setItem('truefew_posts', JSON.stringify(posts));
+        localStorage.setItem('truefew_messages', JSON.stringify(messages));
+        localStorage.setItem('truefew_news_subscriptions', JSON.stringify(userNewsSubscriptions));
+        if (currentUser) {
+            localStorage.setItem('truefew_current_user', JSON.stringify(currentUser));
+        }
+    } catch (e) {
+        // Never let a storage error break posting or UI flow
+        console.warn('saveDataToStorage failed:', e);
+        try { tfDebug('saveDataToStorage error', e.message); } catch(_){}
     }
 }
 
@@ -2613,8 +2990,12 @@ function submitEditProfile() {
         // Convert image to base64 for persistent storage
         const reader = new FileReader();
         reader.onload = function(e) {
-            console.log('🔧 FileReader onload - about to update avatar');
-            currentUser.avatar = e.target.result;
+            const result = e.target.result;
+            if (typeof result === 'string' && result.startsWith('data:')) {
+                currentUser.avatar = result;
+            } else {
+                console.warn('Edit profile avatar did not return data URL; keeping previous avatar');
+            }
             
             // Update the user in the users array
             const userIndex = users.findIndex(u => u.id === currentUser.id);
@@ -2622,7 +3003,6 @@ function submitEditProfile() {
                 users[userIndex] = { ...currentUser };
             }
             
-            console.log('🔧 About to call saveDataToStorage...');
             // Save to storage
             saveDataToStorage();
             
@@ -2641,35 +3021,28 @@ function submitEditProfile() {
                             avatar: currentUser.avatar,
                             updatedAt: new Date().toISOString()
                         });
-                        console.log('✅ Firestore profile updated (image path)');
                     } catch (err) {
                         console.error('❌ Firestore update failed (image path):', err);
                         showNotification('Profile saved locally. Cloud sync failed.', 'warning');
                     }
                 })();
             }
-            console.log('🔧 About to call updateNavbarForSignedInUser...');
             // Update UI
             updateNavbarForSignedInUser();
-            console.log('🔧 About to call updateDashboardContent...');
             updateDashboardContent();
             
-            console.log('🔧 About to close modal...');
             // Close modal
             bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
             
-            console.log('🔧 About to show toast...');
             // Show success message
             showToast('Profile updated successfully!', 'success');
             
-            console.log('🔧 About to refresh page...');
             // Refresh current page
             if (currentPage === 'dashboard') {
                 showDashboard();
             } else if (currentPage === 'profile') {
                 showProfile('current');
             }
-            console.log('🔧 FileReader callback complete!');
         };
         reader.readAsDataURL(imageFile);
         return; // Exit here to let the FileReader handle the rest
@@ -2679,6 +3052,11 @@ function submitEditProfile() {
     // Update the user in the users array
     const userIndex = users.findIndex(u => u.id === currentUser.id);
     if (userIndex !== -1) {
+        // Guard: never persist blob: avatar if one somehow slipped into currentUser
+        if (currentUser.avatar && currentUser.avatar.startsWith('blob:')) {
+            console.warn('Stripping blob: avatar during profile save (no change applied)');
+            delete currentUser.avatar; // forces client to regenerate or keep old stored version
+        }
         users[userIndex] = { ...currentUser };
     }
     
@@ -2753,7 +3131,7 @@ if (typeof window.updateNavbar === 'undefined') {
  * Only allows access for verified users
  */
 auth.onAuthStateChanged(async (user) => {
-    console.log('Auth state changed:', user ? `User: ${user.email} (verified: ${user?.emailVerified})` : 'User signed out');
+    tfDebug('Auth state changed:', user ? `User: ${user.email} (verified: ${user?.emailVerified})` : 'User signed out');
     
     if (user) {
         if (user.emailVerified) {
@@ -2767,6 +3145,8 @@ auth.onAuthStateChanged(async (user) => {
                     currentUser.friends = Array.isArray(currentUser.friends) ? currentUser.friends : [];
                     currentUser.friendRequests = Array.isArray(currentUser.friendRequests) ? currentUser.friendRequests : [];
                     currentUser.messages = Array.isArray(currentUser.messages) ? currentUser.messages : [];
+                    // Ensure current authenticated user exists in local users[] for feed resolution
+                    ensureCurrentUserInUsersArray();
                     updateNavbarForSignedInUser();
                     
                     // Only redirect to dashboard if we're on landing page
@@ -2774,7 +3154,9 @@ auth.onAuthStateChanged(async (user) => {
                         showDashboard();
                     }
                     
-                    console.log('✅ User profile loaded:', currentUser.fullName);
+                    tfDebug('User profile loaded:', currentUser.fullName);
+                    // Refresh feeds in case placeholder authors were used before auth resolved
+                    try { if (typeof loadPostsFeed === 'function') loadPostsFeed(); } catch {}
                 } else {
                     console.error('❌ User profile not found in Firestore');
                     await auth.signOut();
@@ -2785,7 +3167,7 @@ auth.onAuthStateChanged(async (user) => {
             }
         } else {
             // User is signed in but email is NOT verified
-            console.log('⚠️ User email not verified, keeping signed out state');
+            tfDebug('User email not verified, keeping signed out state');
             currentUser = null;
             updateNavbarForSignedOutUser();
             
@@ -2796,7 +3178,7 @@ auth.onAuthStateChanged(async (user) => {
         }
     } else {
         // User is signed out
-        console.log('👋 User signed out');
+    tfDebug('User signed out');
         currentUser = null;
         updateNavbarForSignedOutUser();
         
@@ -2807,49 +3189,54 @@ auth.onAuthStateChanged(async (user) => {
     }
 });
 
+// Ensure the authenticated Firestore user is represented in local users[] (used by feed rendering logic)
+function ensureCurrentUserInUsersArray() {
+    if (!currentUser) return;
+    
+    // Ensure currentUser has an id (use uid if id is missing)
+    if (!currentUser.id && currentUser.uid) {
+        currentUser.id = currentUser.uid;
+    }
+    
+    if (!currentUser.id) {
+        console.warn('currentUser has no id or uid, skipping users array insertion');
+        return;
+    }
+    
+    const existing = users.find(u => u.id === currentUser.id || (currentUser.uid && u.uid === currentUser.uid));
+    if (!existing) {
+        users.push({
+            id: currentUser.id,
+            uid: currentUser.uid,
+            fullName: currentUser.fullName || currentUser.displayName || 'User',
+            username: currentUser.username || (currentUser.email ? currentUser.email.split('@')[0] : `user_${currentUser.id}`),
+            email: currentUser.email || '',
+            avatar: currentUser.avatar || (typeof generateDefaultAvatar === 'function' ? generateDefaultAvatar(currentUser.fullName || 'U') : ''),
+            city: currentUser.city || 'Unknown',
+            state: currentUser.state || 'NA',
+            country: currentUser.country || 'Unknown',
+            interests: Array.isArray(currentUser.interests) ? currentUser.interests : [],
+            friends: currentUser.friends || [],
+            friendRequests: currentUser.friendRequests || [],
+            messages: currentUser.messages || []
+        });
+        saveDataToStorage();
+        tfDebug('Inserted current user into local users[] for feed consistency');
+    }
+}
+
 /* ===========================
    APPLICATION INITIALIZATION
    =========================== */
 
-/**
- * Initialize the application when DOM is loaded
- * Sets up event listeners and loads initial data
- */
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 TrueFew Social App Initializing...');
-    
-    // Wait for Firebase to be ready
-    if (typeof firebase === 'undefined') {
-        console.error('Firebase not loaded! Check your internet connection and Firebase configuration.');
-        return;
-    }
-    
-    // Verify Firebase services are available
-    if (!auth || !db) {
-        console.error('Firebase services not initialized! Check firebase-config.js');
-        return;
-    }
-    
-    console.log('✅ Firebase services ready');
-    
-    // Initialize UI components
-    initializeUI();
-    
-    // Load demo data for news feed
-    loadDemoData();
-
-    // Initialize (guarded) Firebase Analytics with error suppression so GA network blocks
-    // (e.g., by ad blockers) don't spam the console with Fetch failed loading errors.
-    initializeAnalytics();
-    
-    console.log('✅ TrueFew Social App Ready!');
-});
+// Duplicate DOMContentLoaded listener removed - using the one at line 213 instead
 
 /**
  * Initialize UI components and event listeners
  */
 function initializeUI() {
-    console.log(`Initializing UI (version ${window.TRUEFEW_VERSION}) – initializeNotifications type:`, typeof initializeNotifications);
+    // Lightweight init log (removed verbose diagnostics during cleanup pass)
+    console.log(`Initializing UI (v${window.TRUEFEW_VERSION})`);
     // Populate interests in sign-up modal
     populateInterests();
     
@@ -2861,10 +3248,9 @@ function initializeUI() {
         console.warn('initializeNotifications() not defined – using no-op stub');
     }
     
-    // Set up tooltips if Tippy.js is available
-    if (typeof tippy !== 'undefined') {
-        tippy('[data-tippy-content]');
-    }
+    // Tooltips are intentionally disabled (previous 3rd‑party lib removed for stability).
+    // data-tippy-content attributes are converted to native title attributes in index.html.
+    window.__TF_DISABLE_TOOLTIPS = true; // retained flag for future re‑enable toggle
     
     // Show landing page by default
     showLanding();
@@ -3008,22 +3394,5 @@ function suppressAnalyticsNetworkErrors() {
 /* ===========================
    DIAGNOSTIC FALLBACK (Ensures showLastErrors exists)
    =========================== */
-if (typeof window !== 'undefined') {
-    if (typeof window.showLastErrors === 'undefined') {
-        window.showLastErrors = function() {
-            console.warn('[Diagnostic Fallback] Primary diagnostic block not found or not executed.');
-            console.warn('Possible causes: (1) Cached old script, (2) Early parse/runtime error before diagnostics, (3) Script not loaded yet.');
-            console.warn('Check: view-source, search for "Early diagnostic error capture".');
-            console.warn('If missing, force hard reload (Cmd+Shift+R) and ensure script tag has a new version query param.');
-            return window.__tfErrors || [];
-        };
-    }
-    if (typeof window.copyErrors === 'undefined') {
-        window.copyErrors = function() {
-            const errs = window.__tfErrors || [];
-            try { navigator.clipboard.writeText(JSON.stringify(errs, null, 2)); console.log('Copied fallback errors'); }
-            catch { console.log('Fallback errors (manual copy):', errs); }
-        };
-    }
-    console.log(`🩺 Diagnostic integrity check: showLastErrors=${typeof window.showLastErrors}, __tfErrors entries=${(window.__tfErrors&&window.__tfErrors.length)||0}`);
-}
+// Diagnostic fallback block removed during cleanup. If needed, reintroduce minimal
+// helpers or inspect early capture in the dedicated diagnostics module.
